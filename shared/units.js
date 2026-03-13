@@ -87,6 +87,45 @@ export function mkVillager(x, y, owner, state) {
     spec: "none", specLv: 0, gSpd: 1, bSpd: 1, dmg: 2, alive: true, atkCd: 0, abCd: 0,
     equip: { weapon: null, armor: null, tool: null, vehicle: null },
     siegeDmg: 0, atkRange: 1, dmgReduce: 0,
+    mounted: null, // horseId when riding a horse
+    crewing: null, // vehicleId when crewing a siege engine
+    owner,
+  };
+}
+
+/**
+ * Vehicle types and their stats.
+ */
+export const VEHICLE_TYPES = {
+  battering_ram: {
+    hp: 80, maxHp: 80, speed: 0.5, siegeDmg: 18, dmg: 3, atkRange: 1,
+    icon: "🪵", label: "Battering Ram", color: "#6a4a2a",
+  },
+  catapult: {
+    hp: 60, maxHp: 60, speed: 0.3, siegeDmg: 14, dmg: 5, atkRange: 5,
+    icon: "💣", label: "Catapult", color: "#5a5a3a",
+  },
+  cart: {
+    hp: 50, maxHp: 50, speed: 1, siegeDmg: 0, dmg: 0, atkRange: 0,
+    icon: "🛒", label: "Cart", carryBonus: 25, color: "#6a5a2a",
+  },
+};
+
+/**
+ * Create a vehicle entity.
+ * @param {string} type - battering_ram, catapult, or cart
+ * @param {number} x
+ * @param {number} y
+ * @param {string} owner - player id
+ * @param {{ nextUid: number }} state
+ */
+export function mkVehicle(type, x, y, owner, state) {
+  const def = VEHICLE_TYPES[type];
+  return {
+    id: state.nextUid++, type, x, y,
+    hp: def.hp, maxHp: def.maxHp,
+    crewId: null, // villager id controlling it
+    alive: true,
     owner,
   };
 }

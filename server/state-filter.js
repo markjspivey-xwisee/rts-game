@@ -107,6 +107,33 @@ export function getPlayerView(state, playerId) {
     }
   }
 
+  // --- My vehicles ---
+  const myVehicles = (player.vehicles || []).map(v => ({ ...v }));
+
+  // --- Visible horses ---
+  const visibleHorses = [];
+  for (const h of (state.horses || [])) {
+    if (!h.alive) continue;
+    if (fog && fog[h.y] && fog[h.y][h.x] >= FOG_SEEN) {
+      visibleHorses.push({ ...h });
+    }
+  }
+
+  // --- Visible enemy vehicles ---
+  const visibleEnemyVehicles = [];
+  for (const other of state.players) {
+    if (other.id === playerId || other.eliminated) continue;
+    for (const v of (other.vehicles || [])) {
+      if (v.alive && fog && fog[v.y] && fog[v.y][v.x] === FOG_VIS) {
+        visibleEnemyVehicles.push({
+          id: v.id, type: v.type, x: v.x, y: v.y,
+          hp: v.hp, maxHp: v.maxHp, crewId: v.crewId,
+          owner: other.id,
+        });
+      }
+    }
+  }
+
   // --- Neutral / PvE enemies (stored in state.enemies) ---
   const neutralEnemies = [];
   if (state.enemies) {
@@ -155,13 +182,16 @@ export function getPlayerView(state, playerId) {
     particles: state.particles || [],
     myUnits,
     myBuildings,
+    myVehicles,
     myStockpile,
     myTc,
     myTech,
     myPopCap,
     resources,
+    visibleHorses,
     visibleEnemyUnits,
     visibleEnemyBuildings,
+    visibleEnemyVehicles,
     visibleTownCenters,
     neutralEnemies,
     log,

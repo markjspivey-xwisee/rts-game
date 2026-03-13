@@ -7,7 +7,7 @@ import {
   FOG_VIS, TERRAIN_WATER, TERRAIN_BRIDGE, TICK_MS,
 } from "./constants.js";
 import { BLD, getTech } from "./buildings.js";
-import { SP, ET, mkVillager, mkEnemy, calcSpec, applySpec, decayXP } from "./units.js";
+import { SP, ET, mkVillager, mkEnemy, mkVehicle, VEHICLE_TYPES, calcSpec, applySpec, decayXP } from "./units.js";
 import { ITEMS, getEquipBonuses } from "./items.js";
 import { astar, buildGrid } from "./pathfinding.js";
 import { updFog } from "./fog.js";
@@ -55,6 +55,7 @@ export function tickGame(gs) {
     ...gs,
     tick: gs.tick + 1,
     resources: gs.resources.map(r => ({ ...r })),
+    horses: (gs.horses || []).map(h => ({ ...h })),
     enemies: gs.enemies.map(e => ({ ...e })),
     log: [...gs.log],
     particles: gs.particles
@@ -65,6 +66,7 @@ export function tickGame(gs) {
       tc: { ...p.tc },
       units: p.units.map(v => ({ ...v, xp: { ...v.xp }, equip: { ...(v.equip || {}) } })),
       buildings: p.buildings.map(b => ({ ...b })),
+      vehicles: (p.vehicles || []).map(v => ({ ...v })),
       stockpile: { ...p.stockpile },
       fog: p.fog.map(r => new Uint8Array(r)),
       stats: {
@@ -96,6 +98,26 @@ export function tickGame(gs) {
       if (!b.built) continue;
       if (b.type === "farm") player.stockpile.food += BLD.farm.rate;
       if (b.type === "market") player.stockpile.gold += 0.08;
+    }
+
+    // Stable produces tamed horses every 120 ticks
+    if (s.tick % 120 === 0) {
+      for (const b of player.buildings) {
+        if (b.type === "stable" && b.built) {
+          const ownedHorses = (s.horses || []).filter(h => h.alive && h.owner === player.id && !h.riderId);
+          if (ownedHorses.length < 4) { // cap at 4 idle horses per stable
+            s.horses.push({
+              id: s.nextUid++,
+              x: b.x + ri(-1, 1), y: b.y + ri(-1, 1),
+              hp: 20, maxHp: 20,
+              alive: true, tamed: true,
+              riderId: null, owner: player.id,
+              wanderCd: 0,
+            });
+            s.log.push(`[${s.tick}] 🐴 ${player.name}: Horse bred at stable`);
+          }
+        }
+      }
     }
 
     // Food upkeep
@@ -178,7 +200,24 @@ export function tickGame(gs) {
 
       const mv = (tx, ty) => {
         const n = astar(v.x, v.y, tx, ty, grid, 150);
-        if (n) { v.x = n.x; v.y = n.y; }
+        if (n) {
+          v.x = n.x; v.y = n.y;
+          // Mounted units move a second step (2x speed)
+          if (v.mounted && (v.x !== tx || v.y !== ty)) {
+            const n2 = astar(v.x, v.y, tx, ty, grid, 80);
+            if (n2) { v.x = n2.x; v.y = n2.y; }
+          }
+          // Update horse position to follow rider
+          if (v.mounted) {
+            const horse = (s.horses || []).find(h => h.id === v.mounted);
+            if (horse) { horse.x = v.x; horse.y = v.y; }
+          }
+          // Update vehicle position to follow crew
+          if (v.crewing) {
+            const veh = (player.vehicles || []).find(vh => vh.id === v.crewing);
+            if (veh) { veh.x = v.x; veh.y = v.y; }
+          }
+        }
       };
 
       // ── ABILITY ──
@@ -428,10 +467,19 @@ export function tickGame(gs) {
               }
               v.craftProg += v.bSpd;
               if (v.craftProg >= itemDef.craftTime) {
-                v.equip[itemDef.slot] = v.craftItem;
-                applySpec(v);
-                addP(v.x, v.y, itemDef.icon, "#ffd700", 20);
-                s.log.push(`[${s.tick}] ${itemDef.icon} ${player.name} #${v.id}: ${itemDef.label} crafted!`);
+                // Vehicles spawn as physical entities instead of being equipped
+                if (itemDef.slot === "vehicle" && VEHICLE_TYPES[v.craftItem]) {
+                  const veh = mkVehicle(v.craftItem, craftBld.x + 1, craftBld.y + 1, player.id, s);
+                  if (!player.vehicles) player.vehicles = [];
+                  player.vehicles.push(veh);
+                  addP(craftBld.x, craftBld.y, itemDef.icon, "#ffd700", 20);
+                  s.log.push(`[${s.tick}] ${itemDef.icon} ${player.name}: ${itemDef.label} built! (crew it with a villager)`);
+                } else {
+                  v.equip[itemDef.slot] = v.craftItem;
+                  applySpec(v);
+                  addP(v.x, v.y, itemDef.icon, "#ffd700", 20);
+                  s.log.push(`[${s.tick}] ${itemDef.icon} ${player.name} #${v.id}: ${itemDef.label} crafted!`);
+                }
                 v.cmd = "idle"; v.craftItem = null; v.craftProg = 0;
               }
             } else {
@@ -447,6 +495,67 @@ export function tickGame(gs) {
         } else {
           v.cmd = "idle"; v.craftItem = null; v.craftProg = 0;
         }
+      }
+      // ── MOUNT HORSE ──
+      else if (v.cmd === "mount" && v.targetId != null) {
+        const horse = (s.horses || []).find(h => h.id === v.targetId && h.alive && !h.riderId);
+        if (horse) {
+          if (D(v, horse) <= 1) {
+            // Mount the horse
+            v.mounted = horse.id;
+            horse.riderId = v.id;
+            horse.owner = player.id;
+            horse.tamed = true;
+            addP(v.x, v.y, "🐴", "#a86", 15);
+            s.log.push(`[${s.tick}] 🐴 ${player.name} #${v.id}: Mounted horse`);
+            v.cmd = "idle";
+          } else {
+            mv(horse.x, horse.y);
+          }
+        } else {
+          v.cmd = "idle";
+        }
+      }
+      // ── DISMOUNT HORSE ──
+      else if (v.cmd === "dismount" && v.mounted) {
+        const horse = (s.horses || []).find(h => h.id === v.mounted);
+        if (horse) {
+          horse.riderId = null;
+          horse.x = v.x;
+          horse.y = v.y;
+        }
+        v.mounted = null;
+        addP(v.x, v.y, "🐴↓", "#a86", 15);
+        v.cmd = "idle";
+      }
+      // ── CREW VEHICLE ──
+      else if (v.cmd === "crew" && v.targetId != null) {
+        const veh = (player.vehicles || []).find(vh => vh.id === v.targetId && vh.alive && !vh.crewId);
+        if (veh) {
+          if (D(v, veh) <= 1) {
+            v.crewing = veh.id;
+            veh.crewId = v.id;
+            v.x = veh.x;
+            v.y = veh.y;
+            const vt = VEHICLE_TYPES[veh.type];
+            addP(v.x, v.y, vt?.icon || "⚙", "#ca8", 15);
+            s.log.push(`[${s.tick}] ${vt?.icon || "⚙"} ${player.name} #${v.id}: Crewing ${vt?.label || veh.type}`);
+            v.cmd = "idle";
+          } else {
+            mv(veh.x, veh.y);
+          }
+        } else {
+          v.cmd = "idle";
+        }
+      }
+      // ── UNCREW VEHICLE ──
+      else if (v.cmd === "uncrew" && v.crewing) {
+        const veh = (player.vehicles || []).find(vh => vh.id === v.crewing);
+        if (veh) {
+          veh.crewId = null;
+        }
+        v.crewing = null;
+        v.cmd = "idle";
       }
       // ── IDLE ──
       else {
@@ -583,6 +692,65 @@ export function tickGame(gs) {
     }
   }
 
+  // ─── VEHICLE COMBAT (crewed siege engines auto-attack buildings) ──
+  for (const player of s.players) {
+    if (player.eliminated) continue;
+    for (const veh of (player.vehicles || [])) {
+      if (!veh.alive || !veh.crewId) continue;
+      const vt = VEHICLE_TYPES[veh.type];
+      if (!vt || vt.siegeDmg <= 0) continue;
+
+      // Find nearest enemy building or TC in range
+      const atkRange = vt.atkRange || 1;
+      const enemyTCs = getEnemyTCs(s, player.id);
+      let attacked = false;
+
+      for (const etc of enemyTCs) {
+        if (etc.hp > 0 && D(veh, etc) <= Math.max(2, atkRange)) {
+          etc.hp -= vt.siegeDmg + vt.dmg;
+          addP(etc.x, etc.y, `-${vt.siegeDmg + vt.dmg}`, "#f88", 12);
+          const tcOwner = s.players.find(p => p.id === etc.ownerId);
+          if (tcOwner) tcOwner.tc.hp = etc.hp;
+          attacked = true;
+          break;
+        }
+      }
+
+      if (!attacked) {
+        // Attack enemy buildings in range
+        for (const other of s.players) {
+          if (other.id === player.id || other.eliminated) continue;
+          for (const eb of other.buildings) {
+            if (eb.built && eb.hp > 0 && D(veh, eb) <= atkRange) {
+              eb.hp -= vt.siegeDmg + vt.dmg;
+              addP(eb.x, eb.y, `-${vt.siegeDmg + vt.dmg}`, "#f88", 10);
+              if (eb.hp <= 0) {
+                s.log.push(`[${s.tick}] 💥 ${player.name}'s ${vt.label} destroyed ${eb.type}`);
+              }
+              attacked = true;
+              break;
+            }
+          }
+          if (attacked) break;
+        }
+      }
+    }
+  }
+
+  // ─── WILD HORSE WANDERING ───────────────────────────────
+  for (const h of (s.horses || [])) {
+    if (!h.alive || h.riderId) continue;
+    if (h.wanderCd > 0) { h.wanderCd--; continue; }
+    h.wanderCd = ri(8, 25);
+    // Random movement
+    const dx = ri(-1, 1), dy = ri(-1, 1);
+    const nx = cl(h.x + dx, 1, MW - 2);
+    const ny = cl(h.y + dy, 1, MH - 2);
+    if (s.terrain[ny]?.[nx] !== TERRAIN_WATER) {
+      h.x = nx; h.y = ny;
+    }
+  }
+
   // ─── WIN/LOSE CHECK ────────────────────────────────────────
   for (const player of s.players) {
     if (player.eliminated) continue;
@@ -606,8 +774,23 @@ export function tickGame(gs) {
 
   // ─── CLEANUP ───────────────────────────────────────────────
   s.enemies = s.enemies.filter(e => e.alive);
+  s.horses = (s.horses || []).filter(h => h.alive);
   for (const player of s.players) {
+    // If a mounted unit dies, free the horse
+    for (const v of player.units) {
+      if (!v.alive && v.mounted) {
+        const horse = (s.horses || []).find(h => h.id === v.mounted);
+        if (horse) { horse.riderId = null; }
+      }
+      if (!v.alive && v.crewing) {
+        const veh = (player.vehicles || []).find(vh => vh.id === v.crewing);
+        if (veh) { veh.crewId = null; }
+      }
+    }
     player.units = player.units.filter(v => v.alive);
+    player.vehicles = (player.vehicles || []).filter(v => v.alive);
+    // Remove buildings with hp <= 0
+    player.buildings = player.buildings.filter(b => !b.built || b.hp > 0);
     player.buildQueue = (player.buildQueue || []).filter(q => !q.done);
   }
   if (s.log.length > 150) s.log = s.log.slice(-100);

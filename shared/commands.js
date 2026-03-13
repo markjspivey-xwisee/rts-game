@@ -5,7 +5,7 @@
 import { BLD, getTech } from "./buildings.js";
 import { ITEMS } from "./items.js";
 
-const VALID_CMDS = new Set(["gather", "build", "attack", "moveTo", "ability", "idle", "craft"]);
+const VALID_CMDS = new Set(["gather", "build", "attack", "moveTo", "ability", "idle", "craft", "mount", "dismount", "crew", "uncrew"]);
 const VALID_BUILD_TYPES = new Set(Object.keys(BLD));
 
 /**
@@ -59,6 +59,26 @@ export function validateCommand(command, player, state) {
       if (!tech.has(itemDef.requires)) return false;
     }
     if (!player.buildings.some(b => b.type === itemDef.craftAt && b.built)) return false;
+  }
+
+  if (command.cmd === "mount") {
+    if (command.targetId == null) return false;
+    if (unit.mounted || unit.crewing) return false; // already on something
+  }
+
+  if (command.cmd === "dismount") {
+    if (!unit.mounted) return false;
+  }
+
+  if (command.cmd === "crew") {
+    if (command.targetId == null) return false;
+    if (unit.mounted || unit.crewing) return false;
+    const veh = (player.vehicles || []).find(v => v.id === command.targetId && v.alive);
+    if (!veh || veh.crewId) return false; // vehicle doesn't exist or already crewed
+  }
+
+  if (command.cmd === "uncrew") {
+    if (!unit.crewing) return false;
   }
 
   return true;

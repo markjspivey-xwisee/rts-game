@@ -9,6 +9,7 @@ export const BLD = {
   tower:    { cost: { stone: 40, gold: 10 }, size: 1, color: "#4a4a5e", hp: 200, bt: 40, range: 6, dmg: 4, icon: "🗼", requires: "tower" },
   workshop: { cost: { wood: 40, stone: 30 }, size: 2, color: "#5a4a3a", hp: 120, bt: 30, icon: "🔧", unlocks: ["tower"] },
   market:   { cost: { wood: 30, gold: 15 }, size: 2, color: "#6a5a2a", hp: 100, bt: 25, icon: "🏪", unlocks: ["trade"] },
+  stable:   { cost: { wood: 40, food: 20 }, size: 2, color: "#6B5A40", hp: 110, bt: 28, icon: "🐴", unlocks: ["horsemanship"] },
   bridge:   { cost: { wood: 15, stone: 10 }, size: 1, color: "#8B7355", hp: 80, bt: 15, icon: "🌉" },
 };
 

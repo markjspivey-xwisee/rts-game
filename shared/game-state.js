@@ -4,7 +4,7 @@
 
 import { MW, MH, PLAYER_COLORS, ri } from "./constants.js";
 import { genTerrain } from "./terrain.js";
-import { genResources } from "./resources.js";
+import { genResources, genHorses } from "./resources.js";
 import { mkVillager } from "./units.js";
 import { mkFog } from "./fog.js";
 
@@ -49,8 +49,9 @@ export function initGame(config) {
   // Generate terrain with all TC positions
   const terrain = genTerrain(tcPositions);
 
-  // Generate resources
+  // Generate resources and horses
   const resources = genResources(terrain, tcPositions, uidState);
+  const horses = genHorses(terrain, tcPositions, uidState);
 
   // Create players
   /** @type {import('./types.js').Player[]} */
@@ -81,6 +82,7 @@ export function initGame(config) {
       tc: { x: tcPos.x, y: tcPos.y, hp: 500, maxHp: 500 },
       units,
       buildings: [],
+      vehicles: [],
       stockpile: { wood: 120, stone: 30, gold: 0, food: 100 },
       fog: mkFog(),
       popCap: 4,
@@ -106,6 +108,7 @@ export function initGame(config) {
     mapHeight: MH,
     terrain,
     resources,
+    horses,
     players,
     enemies: [],
     log: ["☀ Dawn breaks. Destroy all enemy Town Centers to win!"],

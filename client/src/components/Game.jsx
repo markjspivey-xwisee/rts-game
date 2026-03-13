@@ -19,6 +19,7 @@ const BLD = {
   tower:    { icon: "🗼", size: 1, hp: 200, range: 6, dmg: 4, cost: { stone: 40, gold: 10 } },
   workshop: { icon: "🔧", size: 2, hp: 120, unlocks: "tower", cost: { wood: 40, stone: 30 } },
   market:   { icon: "🏪", size: 2, hp: 100, unlocks: "trade", cost: { wood: 30, gold: 15 } },
+  stable:   { icon: "🐴", size: 2, hp: 110, unlocks: "horsemanship", cost: { wood: 40, food: 20 } },
   bridge:   { icon: "🌉", size: 1, hp: 80, cost: { wood: 15, stone: 10 } },
 };
 
@@ -40,9 +41,9 @@ const ITEMS = {
   bow:           { slot: "weapon",  label: "Bow",              icon: "🏹", cost: { wood: 20, gold: 5 },   craftAt: "barracks", requires: "warrior_training", desc: "+1.5 dmg, 3 range" },
   leather_armor: { slot: "armor",   label: "Leather Armor",    icon: "🦺", cost: { food: 20, gold: 5 },   craftAt: "barracks", desc: "+15 HP" },
   chain_mail:    { slot: "armor",   label: "Chain Mail",       icon: "🛡", cost: { stone: 25, gold: 15 }, craftAt: "barracks", requires: "warrior_training", desc: "+30 HP, -1 incoming" },
-  battering_ram: { slot: "vehicle", label: "Battering Ram",    icon: "🪵", cost: { wood: 60, stone: 30 }, craftAt: "workshop", requires: "tower", desc: "+15 siege damage" },
-  catapult:      { slot: "vehicle", label: "Catapult",         icon: "💣", cost: { wood: 40, stone: 40, gold: 20 }, craftAt: "workshop", requires: "tower", desc: "+10 siege, 4 range" },
-  cart:          { slot: "vehicle", label: "Cart",             icon: "🛒", cost: { wood: 25, gold: 10 },  craftAt: "market", requires: "trade", desc: "+15 carry capacity" },
+  battering_ram: { slot: "vehicle", label: "Battering Ram",    icon: "🪵", cost: { wood: 60, stone: 30 }, craftAt: "workshop", requires: "tower", desc: "Siege engine, crew to use" },
+  catapult:      { slot: "vehicle", label: "Catapult",         icon: "💣", cost: { wood: 40, stone: 40, gold: 20 }, craftAt: "workshop", requires: "tower", desc: "Ranged siege, crew to use" },
+  cart:          { slot: "vehicle", label: "Cart",             icon: "🛒", cost: { wood: 25, gold: 10 },  craftAt: "market", requires: "trade", desc: "Transport vehicle, crew to use" },
 };
 
 const btn = {
@@ -58,7 +59,7 @@ const DEFAULT_SCRIPT = `// Script RTS - Neural Net + Smart Heuristic AI
 // api.items   - item definitions (cost, slot, craftAt, bonuses)
 // api.memory  - persists across ticks (stores the net + decisions)
 //
-// Commands: v.cmd = "gather"|"attack"|"build"|"moveTo"|"ability"|"idle"|"craft"
+// Commands: v.cmd = "gather"|"attack"|"build"|"moveTo"|"ability"|"idle"|"craft"|"mount"|"dismount"|"crew"|"uncrew"
 
 function update(api) {
   const { villagers, enemies, resources, stockpile, tc, buildings, tick, memory, tech, popCap, items } = api;
@@ -125,6 +126,7 @@ function update(api) {
   // Phase 3: Tech buildings
   if (barracksCount > 0 && !hasOrPending("workshop")) smartBuildQueue.push("workshop");
   if (workshopCount > 0 && !hasOrPending("market")) smartBuildQueue.push("market");
+  if (workshopCount > 0 && !hasOrPending("stable")) smartBuildQueue.push("stable");
 
   // Phase 4: More farms for food sustain (1 farm per 6 units)
   const farmTarget = Math.ceil(currentPop / 6);
@@ -206,6 +208,18 @@ function update(api) {
           v.cmd = "craft"; v.craftItem = "hammer"; continue;
         }
       }
+    }
+
+    // ── MOUNT HORSES: warriors/scouts mount available horses for speed ──
+    if (!v.mounted && !v.crewing && v.tag === "mil" && api.horses) {
+      const freeHorse = api.horses.find(h => h.alive && !h.riderId && api.pathDist(v, h) < 15);
+      if (freeHorse) { v.cmd = "mount"; v.targetId = freeHorse.id; continue; }
+    }
+
+    // ── CREW SIEGE VEHICLES: warriors crew available siege engines ──
+    if (!v.mounted && !v.crewing && v.tag === "mil" && api.vehicles) {
+      const freeVeh = api.vehicles.find(vh => vh.alive && !vh.crewId && vh.type !== "cart");
+      if (freeVeh) { v.cmd = "crew"; v.targetId = freeVeh.id; continue; }
     }
 
     // ── STRATEGIC: Build from smart + neural net queue ──
@@ -467,6 +481,8 @@ export default function Game({ gameId, playerId, token, onLeave }) {
   const ui = view || {};
   const myUnits = ui.myUnits || [];
   const myBld = ui.myBuildings || [];
+  const myVehicles = ui.myVehicles || [];
+  const visibleHorses = ui.visibleHorses || [];
   const stk = ui.myStockpile || { wood: 0, stone: 0, gold: 0, food: 0 };
   const players = ui.players || [];
   const myPlayer = players.find(p => p.id === playerId);
@@ -627,10 +643,30 @@ export default function Game({ gameId, playerId, token, onLeave }) {
           </div>
         )}
 
+        {/* Mount / Vehicle Controls */}
+        <div style={{ marginBottom: 6, padding: "4px 6px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
+          <div style={{ color: "#999", fontSize: 8, marginBottom: 3 }}>MOUNT / VEHICLE</div>
+          {v.mounted ? (
+            <div style={{ color: "#a86" }}>
+              <span>🐴 Mounted (2x speed)</span>
+              <div style={{ fontSize: 8, color: "#666", marginTop: 2 }}>Use script: v.cmd="dismount"</div>
+            </div>
+          ) : v.crewing ? (
+            <div style={{ color: "#ca8" }}>
+              <span>⚙ Crewing vehicle</span>
+              <div style={{ fontSize: 8, color: "#666", marginTop: 2 }}>Use script: v.cmd="uncrew"</div>
+            </div>
+          ) : (
+            <div style={{ color: "#555", fontSize: 9 }}>
+              Not mounted. Use v.cmd="mount"; v.targetId=horseId or v.cmd="crew"; v.targetId=vehicleId
+            </div>
+          )}
+        </div>
+
         {/* Equipment */}
         <div style={{ marginBottom: 6, padding: "4px 6px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
           <div style={{ color: "#999", fontSize: 8, marginBottom: 3 }}>EQUIPMENT</div>
-          {["weapon", "armor", "tool", "vehicle"].map(slot => {
+          {["weapon", "armor", "tool"].map(slot => {
             const itemKey = eq[slot];
             const item = itemKey ? ITEMS[itemKey] : null;
             return (

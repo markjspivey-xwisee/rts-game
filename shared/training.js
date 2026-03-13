@@ -107,6 +107,7 @@ function applyNeuralDecision(api, decision, player, state) {
   if (needMorePop && houseCount < 6 && !pendingOf("house")) smartBuildQueue.push("house");
   if (barracksCount > 0 && !hasOrPending("workshop")) smartBuildQueue.push("workshop");
   if (workshopCount > 0 && !hasOrPending("market")) smartBuildQueue.push("market");
+  if (workshopCount > 0 && !hasOrPending("stable")) smartBuildQueue.push("stable");
   const farmTarget = Math.ceil(currentPop / 6);
   if (farmCount < farmTarget && farmCount < 4 && !pendingOf("farm")) smartBuildQueue.push("farm");
   if (workshopCount > 0 && towerCount < 2 && !pendingOf("tower")) smartBuildQueue.push("tower");
@@ -250,12 +251,15 @@ function buildApi(player, state, memory) {
     if (b.type === "barracks") tech.push("warrior_training");
     if (b.type === "workshop") tech.push("tower");
     if (b.type === "market") tech.push("trade");
+    if (b.type === "stable") tech.push("horsemanship");
   }
 
   return {
     villagers: player.units.filter(u => u.alive).map(u => ({ ...u, equip: { ...(u.equip || {}) } })),
     enemies,
     resources: state.resources.filter(r => r.amount > 0),
+    horses: (state.horses || []).filter(h => h.alive),
+    vehicles: player.vehicles || [],
     stockpile: { ...player.stockpile },
     buildings: player.buildings,
     tc: player.tc,

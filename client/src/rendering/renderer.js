@@ -9,6 +9,13 @@ const FOG_UNK = 0, FOG_SEEN = 1, FOG_VIS = 2;
 const RC = { wood: "#2a6e24", stone: "#6a6a7e", gold: "#c4a030", food: "#8a6a2a" };
 const RS = { wood: "🌲", stone: "🪨", gold: "💎", food: "🫐" };
 
+const VEH_COLORS = {
+  battering_ram: "#6a4a2a", catapult: "#5a5a3a", cart: "#6a5a2a",
+};
+const VEH_ICONS = {
+  battering_ram: "🪵", catapult: "💣", cart: "🛒",
+};
+
 const SP = {
   none:       { c: "#b8a080", i: "♟" },
   lumberjack: { c: "#4a8c3f", i: "🪓" },
@@ -20,11 +27,11 @@ const SP = {
 
 const BLD_COLORS = {
   house: "#7B6545", farm: "#7B7B2A", barracks: "#5B3216",
-  tower: "#4a4a5e", workshop: "#5a4a3a", market: "#6a5a2a", bridge: "#8B7355",
+  tower: "#4a4a5e", workshop: "#5a4a3a", market: "#6a5a2a", stable: "#6B5A40", bridge: "#8B7355",
 };
 
 export const BLD_SIZE = {
-  house: 2, farm: 2, barracks: 2, tower: 1, workshop: 2, market: 2, bridge: 1,
+  house: 2, farm: 2, barracks: 2, tower: 1, workshop: 2, market: 2, stable: 2, bridge: 1,
 };
 
 const ET_COLORS = {
@@ -102,6 +109,38 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
       ctx.fillText(Math.floor(r.amount), px + Z / 2, py + Z - 2);
     }
     ctx.globalAlpha = 1;
+  }
+
+  // Horses (wild and tamed)
+  for (const hr of (view.visibleHorses || [])) {
+    if (!hr.alive || hr.riderId) continue; // don't draw mounted horses separately
+    const fv = fog[hr.y]?.[hr.x] ?? FOG_UNK;
+    if (fv === FOG_UNK) continue;
+    const px = sx(hr.x), py = sy(hr.y);
+    if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
+
+    ctx.save();
+    ctx.globalAlpha = fv === FOG_VIS ? 1 : 0.5;
+    // Horse body (brown diamond)
+    ctx.fillStyle = hr.tamed ? "#8a6a3a" : "#7a5a2a";
+    ctx.beginPath();
+    ctx.moveTo(px + Z / 2, py + 1);
+    ctx.lineTo(px + Z - 2, py + Z / 2);
+    ctx.lineTo(px + Z / 2, py + Z - 1);
+    ctx.lineTo(px + 2, py + Z / 2);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = hr.tamed ? "#c9a825" : "#5a4a2a";
+    ctx.lineWidth = 0.8;
+    ctx.stroke();
+    // Label
+    if (fv === FOG_VIS) {
+      ctx.fillStyle = "#fff";
+      ctx.font = `${Math.max(6, 7 * zoom)}px monospace`;
+      ctx.textAlign = "center";
+      ctx.fillText(hr.tamed ? "🐴" : "🐎", px + Z / 2, py - 1);
+    }
+    ctx.restore();
   }
 
   // Player info map for colors
@@ -202,6 +241,56 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     drawTC(tc, owner?.color || "#c44", owner?.name?.substring(0, 4) || "?");
   }
 
+  // My vehicles
+  for (const veh of (view.myVehicles || [])) {
+    if (!veh.alive) continue;
+    const px = sx(veh.x), py = sy(veh.y);
+    if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
+
+    const vc = VEH_COLORS[veh.type] || "#6a4a2a";
+    ctx.fillStyle = vc;
+    // Draw as a larger square
+    ctx.fillRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.strokeStyle = veh.crewId ? "#c9a825" : "#555";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 1, py + 1, Z - 2, Z - 2);
+    // Icon
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.max(7, 8 * zoom)}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(VEH_ICONS[veh.type] || "⚙", px + Z / 2, py + Z / 2 + 3);
+    // HP bar
+    if (veh.hp < veh.maxHp) {
+      ctx.fillStyle = "#222";
+      ctx.fillRect(px, py - 4, Z, 2);
+      ctx.fillStyle = "#4a8";
+      ctx.fillRect(px, py - 4, Z * (veh.hp / veh.maxHp), 2);
+    }
+    // "Empty" indicator if no crew
+    if (!veh.crewId) {
+      ctx.fillStyle = "#ff8";
+      ctx.font = `${Math.max(5, 6 * zoom)}px monospace`;
+      ctx.fillText("⬚", px + Z / 2, py - 1);
+    }
+  }
+
+  // Enemy vehicles
+  for (const veh of (view.visibleEnemyVehicles || [])) {
+    const px = sx(veh.x), py = sy(veh.y);
+    if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
+
+    const owner = playerMap[veh.owner];
+    ctx.fillStyle = owner?.color || "#a05050";
+    ctx.fillRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.strokeStyle = owner?.color || "#c66";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.max(7, 8 * zoom)}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(VEH_ICONS[veh.type] || "⚙", px + Z / 2, py + Z / 2 + 3);
+  }
+
   // My units
   for (const v of (view.myUnits || [])) {
     if (!v.alive) continue;
@@ -209,12 +298,22 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
 
     const sp = SP[v.spec] || SP.none;
+
+    // Mounted indicator: draw horse body under unit
+    if (v.mounted) {
+      ctx.fillStyle = "#7a5a2a";
+      ctx.fillRect(px + 1, py + Z * 0.4, Z - 2, Z * 0.5);
+      ctx.strokeStyle = "#5a4020";
+      ctx.lineWidth = 0.5;
+      ctx.strokeRect(px + 1, py + Z * 0.4, Z - 2, Z * 0.5);
+    }
+
     ctx.fillStyle = sp.c;
     ctx.beginPath();
-    ctx.arc(px + Z / 2, py + Z / 2, Z * 0.38, 0, Math.PI * 2);
+    ctx.arc(px + Z / 2, py + Z / 2 - (v.mounted ? 2 : 0), Z * 0.38, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = "#c9a825";
-    ctx.lineWidth = 0.5;
+    ctx.strokeStyle = v.mounted ? "#c9a825" : "#c9a825";
+    ctx.lineWidth = v.mounted ? 1 : 0.5;
     ctx.stroke();
 
     // Level stars
@@ -222,7 +321,15 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
       ctx.fillStyle = "#ffd700";
       ctx.font = `bold ${Math.max(5, 6 * zoom)}px monospace`;
       ctx.textAlign = "center";
-      ctx.fillText("★".repeat(Math.min(v.specLv, 3)), px + Z / 2, py - 2);
+      ctx.fillText("★".repeat(Math.min(v.specLv, 3)), px + Z / 2, py - (v.mounted ? 4 : 2));
+    }
+
+    // Mounted icon
+    if (v.mounted) {
+      ctx.fillStyle = "#fff";
+      ctx.font = `${Math.max(5, 5 * zoom)}px monospace`;
+      ctx.textAlign = "center";
+      ctx.fillText("🐴", px + Z / 2, py + Z + 4);
     }
 
     // HP bar
@@ -383,6 +490,18 @@ export function renderMini(ctx, view, cam, cw, ch, myId, zoom = 1) {
     const owner = playerMap[tc.owner || tc.ownerId];
     ctx.fillStyle = owner?.color || "#c44";
     ctx.fillRect((tc.x - 1) * mx, (tc.y - 1) * my, 3 * mx, 3 * my);
+  }
+
+  // Horses
+  ctx.fillStyle = "#a86";
+  for (const hr of (view.visibleHorses || [])) {
+    if (hr.alive && !hr.riderId) ctx.fillRect(hr.x * mx - 0.5, hr.y * my - 0.5, 2, 2);
+  }
+
+  // My vehicles
+  ctx.fillStyle = "#ca8";
+  for (const v of (view.myVehicles || [])) {
+    if (v.alive) ctx.fillRect(v.x * mx - 0.5, v.y * my - 0.5, 3, 3);
   }
 
   // My units

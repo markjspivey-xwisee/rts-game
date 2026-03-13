@@ -84,6 +84,7 @@ export function tickBotPlayer(player, state, grid) {
     else if (builtOf("workshop") < 1 && builtOf("barracks") >= 1) tryBuild("workshop");
     else if (builtOf("farm") < Math.ceil(pop / 5) && builtOf("farm") < 4) tryBuild("farm");
     else if (builtOf("market") < 1 && builtOf("workshop") >= 1) tryBuild("market");
+    else if (builtOf("stable") < 1 && builtOf("workshop") >= 1) tryBuild("stable");
     else if (builtOf("tower") < 2 && builtOf("workshop") >= 1) tryBuild("tower");
     else if (builtOf("barracks") < 2 && pop >= 10) tryBuild("barracks");
     else if (pop >= popCap - 1 && builtOf("house") < 6) tryBuild("house");

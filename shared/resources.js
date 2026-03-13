@@ -2,7 +2,7 @@
 //  RESOURCE GENERATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { MW, MH, TERRAIN_WATER, D, cl, ri } from "./constants.js";
+import { MW, MH, TERRAIN_WATER, TERRAIN_GRASS, D, cl, ri } from "./constants.js";
 
 /**
  * Generate map resources placed symmetrically around TC positions.
@@ -102,4 +102,55 @@ export function genResources(terrain, tcPositions, state) {
   }
 
   return res;
+}
+
+/**
+ * Generate wild horse herds on the map.
+ * @param {Uint8Array[]} terrain
+ * @param {{x:number, y:number}[]} tcPositions
+ * @param {{ nextUid: number }} state
+ * @returns {import('./types.js').Horse[]}
+ */
+export function genHorses(terrain, tcPositions, state) {
+  const horses = [];
+  const minTcDist = 8;
+
+  // Spawn 3-5 small herds of 1-3 horses each on grass tiles
+  const herdCount = ri(3, 5);
+  for (let h = 0; h < herdCount; h++) {
+    // Pick a random grass position away from TCs
+    for (let attempt = 0; attempt < 30; attempt++) {
+      const cx = ri(4, MW - 5);
+      const cy = ri(4, MH - 5);
+      if (terrain[cy]?.[cx] !== TERRAIN_GRASS && terrain[cy]?.[cx] !== undefined) continue;
+      if (terrain[cy]?.[cx] === TERRAIN_WATER) continue;
+
+      let tooClose = false;
+      for (const tc of tcPositions) {
+        if (D({ x: cx, y: cy }, tc) < minTcDist) { tooClose = true; break; }
+      }
+      if (tooClose) continue;
+
+      // Spawn 1-3 horses near this spot
+      const count = ri(1, 3);
+      for (let i = 0; i < count; i++) {
+        const hx = cl(cx + ri(-2, 2), 1, MW - 2);
+        const hy = cl(cy + ri(-2, 2), 1, MH - 2);
+        if (terrain[hy]?.[hx] === TERRAIN_WATER) continue;
+        horses.push({
+          id: state.nextUid++,
+          x: hx, y: hy,
+          hp: 20, maxHp: 20,
+          alive: true,
+          tamed: false,
+          riderId: null,
+          owner: null,
+          wanderCd: ri(0, 20),
+        });
+      }
+      break;
+    }
+  }
+
+  return horses;
 }

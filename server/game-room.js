@@ -346,6 +346,8 @@ export class GameRoom {
         ...(view.neutralEnemies || []),
       ],
       resources: view.resources || [],
+      horses: view.visibleHorses || [],
+      vehicles: view.myVehicles || [],
       stockpile: { ...(view.myStockpile || {}) },
       buildings: view.myBuildings || [],
       tc: view.myTc || { x: 0, y: 0 },
@@ -382,6 +384,10 @@ export class GameRoom {
       if (u.cmd === "build") { cmd.buildType = u.buildType; cmd.x = u.buildX; cmd.y = u.buildY; }
       if (u.cmd === "craft") { cmd.craftItem = u.craftItem; }
       if (u.cmd === "ability") { /* no extra fields */ }
+      if (u.cmd === "mount" && u.targetId != null) cmd.targetId = u.targetId;
+      if (u.cmd === "dismount") { /* no extra fields */ }
+      if (u.cmd === "crew" && u.targetId != null) cmd.targetId = u.targetId;
+      if (u.cmd === "uncrew") { /* no extra fields */ }
       commands.push(cmd);
     }
     return commands;
@@ -488,6 +494,9 @@ export class GameRoom {
       resources: this.state.resources.filter(r => r.amount > 0).map(r => ({
         id: r.id, type: r.type, x: r.x, y: r.y,
       })),
+      horses: (this.state.horses || []).filter(h => h.alive).map(h => ({
+        id: h.id, x: h.x, y: h.y, tamed: h.tamed, riderId: h.riderId,
+      })),
       gameOver: this.state.gameOver,
       winner: this.state.winner,
     };
@@ -554,6 +563,15 @@ export class GameRoom {
       resources: this.state.resources.filter(r => r.amount > 0).map(r => ({
         id: r.id, type: r.type, x: r.x, y: r.y,
       })),
+      horses: (this.state.horses || []).filter(h => h.alive).map(h => ({
+        id: h.id, x: h.x, y: h.y, tamed: h.tamed, riderId: h.riderId, owner: h.owner, alive: h.alive,
+      })),
+      allVehicles: this.state.players.flatMap(p =>
+        (p.vehicles || []).filter(v => v.alive).map(v => ({
+          id: v.id, owner: p.id, type: v.type, x: v.x, y: v.y,
+          hp: v.hp, maxHp: v.maxHp, crewId: v.crewId,
+        }))
+      ),
       gameOver: this.state.gameOver,
       winner: this.state.winner,
     };
