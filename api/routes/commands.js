@@ -33,8 +33,8 @@ export function createCommandsRouter(lobby) {
 
       // Validate command structure
       for (const cmd of commands) {
-        if (!cmd.type) {
-          return res.status(400).json({ error: "Each command must have a type" });
+        if (!cmd.type && !cmd.action && !cmd.cmd) {
+          return res.status(400).json({ error: "Each command must have a type (or action/cmd)" });
         }
       }
 

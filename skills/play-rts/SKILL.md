@@ -35,6 +35,27 @@ Play a multiplayer real-time strategy game supporting 2-4 players (humans, AI ag
    submit_script(game_id="...", code="function update(api) { ... }")
    ```
 
+## Game State Response (REST API)
+
+The `GET /api/games/:id/state` response includes:
+
+| Field | Description |
+|-------|-------------|
+| tick | Current game tick |
+| myUnits | Array of your units (id, x, y, hp, spec, action, xp) |
+| myBuildings | Array of your buildings (id, type, hp, x, y) |
+| myStockpile | { wood, stone, gold, food } |
+| myTc | Your Town Center { x, y, hp, maxHp } |
+| myTech | Unlocked technologies |
+| myPopCap | Current population cap |
+| resources | Visible resource nodes (id, type, x, y) |
+| visibleEnemyUnits | Enemy units in your fog range |
+| visibleEnemyBuildings | Enemy buildings in your fog range |
+| visibleTownCenters | All visible TCs |
+| stkDelta | Resource income/loss rates |
+| gameOver | Boolean |
+| winner | Winner player ID (if game over) |
+
 ## Win Condition
 
 Destroy all enemy Town Centers. Last player standing wins.
@@ -86,13 +107,15 @@ Villagers specialize through XP into one of 5 roles:
 
 ## Commands
 
+Use `type` (or `action`) to specify the command. Both are accepted.
+
 ```json
-{ "unit_id": 5, "action": "gather", "target_id": 42 }
-{ "unit_id": 3, "action": "build", "build_type": "house", "x": 14, "y": 20 }
-{ "unit_id": 7, "action": "attack", "target_id": 12 }
-{ "unit_id": 7, "action": "moveTo", "x": 51, "y": 22 }
-{ "unit_id": 7, "action": "ability" }
-{ "unit_id": 7, "action": "idle" }
+{ "unit_id": 5, "type": "gather", "target_id": 42 }
+{ "unit_id": 3, "type": "build", "build_type": "house", "x": 14, "y": 20 }
+{ "unit_id": 7, "type": "attack", "target_id": 12 }
+{ "unit_id": 7, "type": "moveTo", "x": 51, "y": 22 }
+{ "unit_id": 7, "type": "ability" }
+{ "unit_id": 7, "type": "idle" }
 ```
 
 ## Strategy Guide
