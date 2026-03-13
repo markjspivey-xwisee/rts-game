@@ -58,7 +58,7 @@ Destroy all enemy Town Centers. Last player standing wins.
 
 - Each villager costs 0.04 food/tick upkeep
 - New villager spawns every 55 ticks if food >= 30
-- Below -20 food: starvation (-1 HP/tick to all villagers)
+- At 0 food: starvation (-0.5 HP/tick to all villagers)
 
 ## Units
 
