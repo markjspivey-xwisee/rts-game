@@ -51,31 +51,28 @@ const btn = {
   padding: "3px 8px", fontSize: 11, whiteSpace: "nowrap",
 };
 
-const DEFAULT_SCRIPT = `// Script RTS - Neural Net AI
-// The neural net handles strategy (what to prioritize), the script handles tactics.
+const DEFAULT_SCRIPT = `// Script RTS - Neural Net + Smart Heuristic AI
+// Neural net handles strategy weights, heuristics ensure good build order & progression.
 //
 // api.neural  - { create(layers), load(json), extractFeatures(api), decodeAction(out) }
 // api.items   - item definitions (cost, slot, craftAt, bonuses)
 // api.memory  - persists across ticks (stores the net + decisions)
 //
 // Commands: v.cmd = "gather"|"attack"|"build"|"moveTo"|"ability"|"idle"|"craft"
-// Craft:    v.cmd = "craft"; v.craftItem = "sword";
 
 function update(api) {
   const { villagers, enemies, resources, stockpile, tc, buildings, tick, memory, tech, popCap, items } = api;
 
   // ── Initialize neural net ──
-  // Tries to load pre-trained weights from the weight library, falls back to random.
   if (!memory.net) {
     if (memory._defaultWeights) {
       memory.net = api.neural.load(memory._defaultWeights);
     } else {
-      memory.net = api.neural.create(); // random [45, 32, 16, 13]
+      memory.net = api.neural.create();
     }
-    // To load custom weights: memory.net = api.neural.load(WEIGHTS_JSON);
   }
 
-  // ── Run neural net every 5 ticks for strategic decisions ──
+  // ── Run neural net every 5 ticks ──
   if (!memory.d || tick % 5 === 0) {
     const features = api.neural.extractFeatures(api);
     const output = memory.net.forward(features);
@@ -85,11 +82,11 @@ function update(api) {
   const d = memory.d;
   const threats = enemies.filter(e => api.pathDist(e, tc) < 14);
   const alive = villagers.filter(v => v.alive !== false);
-  const milTarget = Math.round(d.militaryRatio * alive.length);
+  const milTarget = Math.max(2, Math.round(d.militaryRatio * alive.length));
   let milCount = alive.filter(v => v.tag === "mil").length;
   let bldCount = alive.filter(v => v.tag === "bld").length;
 
-  // ── Building costs (for affordability checks) ──
+  // ── Building costs ──
   const BLD_COST = {
     house: { wood: 30 }, farm: { wood: 20 }, barracks: { wood: 50, stone: 20 },
     tower: { stone: 40, gold: 10 }, workshop: { wood: 40, stone: 30 },
@@ -100,11 +97,62 @@ function update(api) {
     return c && Object.entries(c).every(([r, a]) => (stockpile[r] || 0) >= a);
   };
 
-  for (const v of villagers) {
-    // ── Tag assignment (neural net controls military ratio) ──
+  // ── Count existing buildings ──
+  const builtOf = (type) => buildings.filter(b => b.type === type && b.built).length;
+  const pendingOf = (type) => buildings.filter(b => b.type === type && !b.built).length;
+  const hasOrPending = (type) => builtOf(type) > 0 || pendingOf(type) > 0;
+
+  const houseCount = builtOf("house");
+  const farmCount = builtOf("farm");
+  const barracksCount = builtOf("barracks");
+  const workshopCount = builtOf("workshop");
+  const marketCount = builtOf("market");
+  const towerCount = builtOf("tower");
+
+  // ── SMART BUILD QUEUE: heuristic override of neural net ──
+  // This ensures essential buildings get built regardless of neural net bias
+  const smartBuildQueue = [];
+
+  // Phase 1: Early game essentials
+  if (!hasOrPending("farm") && alive.length >= 3) smartBuildQueue.push("farm");
+  if (!hasOrPending("barracks") && alive.length >= 4) smartBuildQueue.push("barracks");
+
+  // Phase 2: Only build houses when we NEED pop cap (current pop within 2 of cap)
+  const currentPop = alive.length;
+  const needMorePop = currentPop >= popCap - 2;
+  if (needMorePop && houseCount < 6 && !pendingOf("house")) smartBuildQueue.push("house");
+
+  // Phase 3: Tech buildings
+  if (barracksCount > 0 && !hasOrPending("workshop")) smartBuildQueue.push("workshop");
+  if (workshopCount > 0 && !hasOrPending("market")) smartBuildQueue.push("market");
+
+  // Phase 4: More farms for food sustain (1 farm per 6 units)
+  const farmTarget = Math.ceil(currentPop / 6);
+  if (farmCount < farmTarget && farmCount < 4 && !pendingOf("farm")) smartBuildQueue.push("farm");
+
+  // Phase 5: Defenses
+  if (workshopCount > 0 && towerCount < 2 && !pendingOf("tower")) smartBuildQueue.push("tower");
+
+  // Phase 6: Additional barracks for more warriors
+  if (barracksCount > 0 && barracksCount < 2 && alive.length >= 10 && !pendingOf("barracks")) smartBuildQueue.push("barracks");
+
+  // Merge neural net build orders (filtered) with smart queue
+  const netBuilds = (d.buildOrders || []).filter(b => {
+    // Block excessive houses
+    if (b === "house" && !needMorePop) return false;
+    if (b === "house" && houseCount >= 6) return false;
+    return true;
+  });
+
+  // Smart queue takes priority, then neural net suggestions
+  const finalBuildQueue = [...new Set([...smartBuildQueue, ...netBuilds])];
+
+  for (const v of alive) {
+    // ── Tag assignment: 2-3 builders, rest split by neural net ──
     if (!v.tag) {
+      const builderTarget = alive.length >= 8 ? 3 : 2;
       if (v.spec === "warrior") { v.tag = "mil"; milCount++; }
-      else if (bldCount < 1) { v.tag = "bld"; bldCount++; }
+      else if (bldCount < builderTarget) { v.tag = "bld"; bldCount++; }
       else if (milCount < milTarget) { v.tag = "mil"; milCount++; }
       else v.tag = "eco";
     }
@@ -128,32 +176,48 @@ function update(api) {
       continue;
     }
 
-    // ── STRATEGIC: Craft signal from neural net ──
-    if (d.shouldCraft) {
-      if (v.spec === "warrior" && !v.equip?.weapon && tech.includes("warrior_training")) {
-        if (buildings.some(b => b.type === "barracks" && b.built) && stockpile.stone >= 20 && stockpile.gold >= 10) {
-          v.cmd = "craft"; v.craftItem = "sword"; continue;
+    // ── ALWAYS try crafting for equipped units (don't wait for neural net signal) ──
+    if (v.spec === "warrior" && !v.equip?.weapon && tech.includes("warrior_training")) {
+      if (buildings.some(b => b.type === "barracks" && b.built) && stockpile.stone >= 20 && stockpile.gold >= 10) {
+        v.cmd = "craft"; v.craftItem = "sword"; continue;
+      }
+    }
+    if (["lumberjack","miner","farmer"].includes(v.spec) && !v.equip?.tool) {
+      if (buildings.some(b => b.type === "workshop" && b.built)) {
+        const toolMap = { lumberjack: "iron_axe", miner: "iron_pickaxe", farmer: "sickle" };
+        const tool = toolMap[v.spec];
+        const cost = items[tool]?.cost || {};
+        if (Object.entries(cost).every(([r, a]) => (stockpile[r] || 0) >= a)) {
+          v.cmd = "craft"; v.craftItem = tool; continue;
         }
       }
-      if (["lumberjack","miner","farmer"].includes(v.spec) && !v.equip?.tool) {
-        if (buildings.some(b => b.type === "workshop" && b.built)) {
-          const toolMap = { lumberjack: "iron_axe", miner: "iron_pickaxe", farmer: "sickle" };
-          const tool = toolMap[v.spec];
-          const cost = items[tool]?.cost || {};
-          if (Object.entries(cost).every(([r, a]) => (stockpile[r] || 0) >= a)) {
-            v.cmd = "craft"; v.craftItem = tool; continue;
-          }
+    }
+    // Craft armor for warriors
+    if (v.spec === "warrior" && v.equip?.weapon && !v.equip?.armor) {
+      if (buildings.some(b => b.type === "barracks" && b.built) && stockpile.food >= 20 && stockpile.gold >= 5) {
+        v.cmd = "craft"; v.craftItem = "leather_armor"; continue;
+      }
+    }
+    // Craft builder hammer
+    if (v.tag === "bld" && v.spec === "builder" && !v.equip?.tool) {
+      if (buildings.some(b => b.type === "workshop" && b.built)) {
+        const cost = items["hammer"]?.cost || {};
+        if (Object.entries(cost).every(([r, a]) => (stockpile[r] || 0) >= a)) {
+          v.cmd = "craft"; v.craftItem = "hammer"; continue;
         }
       }
     }
 
-    // ── STRATEGIC: Build orders from neural net ──
-    if (v.tag === "bld") {
-      for (const bType of d.buildOrders) {
+    // ── STRATEGIC: Build from smart + neural net queue ──
+    if (v.tag === "bld" && finalBuildQueue.length > 0) {
+      for (const bType of finalBuildQueue) {
         if (canAfford(bType)) {
           v.cmd = "build"; v.buildType = bType;
-          v.buildX = tc.x + Math.floor(Math.random() * 10 - 5);
-          v.buildY = tc.y + Math.floor(Math.random() * 10 - 5);
+          // Place buildings in a spread pattern around TC
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 4 + Math.random() * 6;
+          v.buildX = Math.round(tc.x + Math.cos(angle) * dist);
+          v.buildY = Math.round(tc.y + Math.sin(angle) * dist);
           break;
         }
       }
@@ -161,7 +225,10 @@ function update(api) {
     }
 
     // ── STRATEGIC: Gather priority from neural net ──
-    const gp = d.gatherPriority;
+    // Heuristic boost: if food is low, prioritize food
+    const gp = { ...d.gatherPriority };
+    if (stockpile.food < 30) gp.food = Math.max(gp.food || 0, 0.9);
+    if (stockpile.wood < 20) gp.wood = Math.max(gp.wood || 0, 0.8);
     const types = ["wood", "stone", "gold", "food"];
     types.sort((a, b) => (gp[b] || 0) - (gp[a] || 0));
     for (const gt of types) {

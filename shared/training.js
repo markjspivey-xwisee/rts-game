@@ -45,35 +45,95 @@ export function scoreFitness(player, gameState) {
   // Survival time
   score += Math.min(gameState.tick / 100, 20);
 
+  // ── Building diversity bonus ──
+  // Reward having a variety of building types (not just houses)
+  const builtTypes = new Set(player.buildings.filter(b => b.built).map(b => b.type));
+  score += builtTypes.size * 8; // 8 points per unique building type
+  if (builtTypes.has("farm")) score += 10;
+  if (builtTypes.has("workshop")) score += 15;
+  if (builtTypes.has("market")) score += 10;
+  if (builtTypes.has("tower")) score += 10;
+
+  // Penalize house spam (more than 4 houses with fewer than 3 other building types)
+  const houseCount = player.buildings.filter(b => b.type === "house" && b.built).length;
+  const otherTypes = builtTypes.size - (builtTypes.has("house") ? 1 : 0);
+  if (houseCount > 4 && otherTypes < 3) score -= (houseCount - 4) * 5;
+
+  // ── Crafting/tech bonus ──
+  const equippedUnits = player.units.filter(u => u.alive && (u.equip?.weapon || u.equip?.tool));
+  score += equippedUnits.length * 5;
+
   return score;
 }
 
 /**
  * Apply neural net decisions to a player's units for one tick.
- * This is the "script" that bridges net output → unit commands.
+ * Uses smart heuristics to supplement neural net decisions for build order,
+ * crafting, and resource priority.
  */
 function applyNeuralDecision(api, decision, player, state) {
   const alive = api.villagers.filter(v => v.alive !== false);
   const threats = api.enemies.filter(e => api.pathDist(e, api.tc) < 14);
-  const milTarget = Math.round(decision.militaryRatio * alive.length);
+  const milTarget = Math.max(2, Math.round(decision.militaryRatio * alive.length));
   const D = api.pathDist;
+  const stk = api.stockpile;
 
   let milCount = 0;
   let bldCount = 0;
 
-  // Count current tags
   for (const v of alive) {
     if (v.tag === "mil") milCount++;
     if (v.tag === "bld") bldCount++;
   }
 
+  // ── Count existing buildings ──
+  const builtOf = (type) => api.buildings.filter(b => b.type === type && b.built).length;
+  const pendingOf = (type) => api.buildings.filter(b => b.type === type && !b.built).length;
+  const hasOrPending = (type) => builtOf(type) > 0 || pendingOf(type) > 0;
+
+  const houseCount = builtOf("house");
+  const farmCount = builtOf("farm");
+  const barracksCount = builtOf("barracks");
+  const workshopCount = builtOf("workshop");
+  const marketCount = builtOf("market");
+  const towerCount = builtOf("tower");
+  const currentPop = alive.length;
+  const needMorePop = currentPop >= (api.popCap || 4) - 2;
+
+  // ── SMART BUILD QUEUE ──
+  const smartBuildQueue = [];
+  if (!hasOrPending("farm") && currentPop >= 3) smartBuildQueue.push("farm");
+  if (!hasOrPending("barracks") && currentPop >= 4) smartBuildQueue.push("barracks");
+  if (needMorePop && houseCount < 6 && !pendingOf("house")) smartBuildQueue.push("house");
+  if (barracksCount > 0 && !hasOrPending("workshop")) smartBuildQueue.push("workshop");
+  if (workshopCount > 0 && !hasOrPending("market")) smartBuildQueue.push("market");
+  const farmTarget = Math.ceil(currentPop / 6);
+  if (farmCount < farmTarget && farmCount < 4 && !pendingOf("farm")) smartBuildQueue.push("farm");
+  if (workshopCount > 0 && towerCount < 2 && !pendingOf("tower")) smartBuildQueue.push("tower");
+  if (barracksCount > 0 && barracksCount < 2 && currentPop >= 10 && !pendingOf("barracks")) smartBuildQueue.push("barracks");
+
+  // Filter neural net builds (block excessive houses)
+  const netBuilds = (decision.buildOrders || []).filter(b => {
+    if (b === "house" && !needMorePop) return false;
+    if (b === "house" && houseCount >= 6) return false;
+    return true;
+  });
+  const finalBuildQueue = [...new Set([...smartBuildQueue, ...netBuilds])];
+
+  const canAfford = (type) => {
+    const bd = BLD[type];
+    if (!bd) return false;
+    return Object.entries(bd.cost).every(([r, a]) => (stk[r] || 0) >= a);
+  };
+
   const commands = [];
 
   for (const v of alive) {
-    // Auto-tag
+    // Auto-tag: 2-3 builders
     if (!v.tag) {
+      const builderTarget = currentPop >= 8 ? 3 : 2;
       if (v.spec === "warrior") v.tag = "mil";
-      else if (bldCount < 1) { v.tag = "bld"; bldCount++; }
+      else if (bldCount < builderTarget) { v.tag = "bld"; bldCount++; }
       else if (milCount < milTarget) { v.tag = "mil"; milCount++; }
       else v.tag = "eco";
     }
@@ -97,44 +157,53 @@ function applyNeuralDecision(api, decision, player, state) {
       cmd = { cmd: "moveTo", unitId: v.id, moveX: api.enemyTc.x, moveY: api.enemyTc.y };
     }
 
-    // Build
-    if (!cmd && v.tag === "bld" && decision.buildOrders.length > 0) {
-      for (const bType of decision.buildOrders) {
-        const bd = BLD[bType];
-        if (!bd) continue;
-        const stk = api.stockpile;
-        const canAfford = Object.entries(bd.cost).every(([r, a]) => (stk[r] || 0) >= a);
-        if (canAfford) {
+    // Always craft when possible (don't wait for neural net signal)
+    if (!cmd && v.spec === "warrior" && !v.equip?.weapon) {
+      const hasBks = api.buildings.some(b => b.type === "barracks" && b.built);
+      const hasTech = api.tech.includes("warrior_training");
+      if (hasBks && hasTech && stk.stone >= 20 && stk.gold >= 10) {
+        cmd = { cmd: "craft", unitId: v.id, craftItem: "sword" };
+      }
+    }
+    if (!cmd && ["lumberjack", "miner", "farmer"].includes(v.spec) && !v.equip?.tool) {
+      const hasWks = api.buildings.some(b => b.type === "workshop" && b.built);
+      if (hasWks) {
+        const toolMap = { lumberjack: "iron_axe", miner: "iron_pickaxe", farmer: "sickle" };
+        const item = toolMap[v.spec];
+        const cost = ITEMS[item]?.cost || {};
+        if (Object.entries(cost).every(([r, a]) => (stk[r] || 0) >= a)) {
+          cmd = { cmd: "craft", unitId: v.id, craftItem: item };
+        }
+      }
+    }
+    if (!cmd && v.spec === "warrior" && v.equip?.weapon && !v.equip?.armor) {
+      const hasBks = api.buildings.some(b => b.type === "barracks" && b.built);
+      if (hasBks && stk.food >= 20 && stk.gold >= 5) {
+        cmd = { cmd: "craft", unitId: v.id, craftItem: "leather_armor" };
+      }
+    }
+
+    // Build from smart queue
+    if (!cmd && v.tag === "bld" && finalBuildQueue.length > 0) {
+      for (const bType of finalBuildQueue) {
+        if (canAfford(bType)) {
+          const angle = Math.random() * Math.PI * 2;
+          const dist = 4 + Math.random() * 6;
           cmd = {
             cmd: "build", unitId: v.id, buildType: bType,
-            buildX: api.tc.x + Math.floor(Math.random() * 10 - 5),
-            buildY: api.tc.y + Math.floor(Math.random() * 10 - 5),
+            buildX: Math.round(api.tc.x + Math.cos(angle) * dist),
+            buildY: Math.round(api.tc.y + Math.sin(angle) * dist),
           };
           break;
         }
       }
     }
 
-    // Craft
-    if (!cmd && decision.shouldCraft) {
-      if (v.spec === "warrior" && !v.equip?.weapon) {
-        const hasBks = api.buildings.some(b => b.type === "barracks" && b.built);
-        const hasTech = api.tech.includes("warrior_training");
-        if (hasBks && hasTech) {
-          cmd = { cmd: "craft", unitId: v.id, craftItem: "sword" };
-        }
-      } else if (["lumberjack", "miner", "farmer"].includes(v.spec) && !v.equip?.tool) {
-        const hasWks = api.buildings.some(b => b.type === "workshop" && b.built);
-        if (hasWks) {
-          const toolMap = { lumberjack: "iron_axe", miner: "iron_pickaxe", farmer: "sickle" };
-          cmd = { cmd: "craft", unitId: v.id, craftItem: toolMap[v.spec] };
-        }
-      }
-    }
-
-    // Gather (use neural net priority)
+    // Gather with heuristic boost
     if (!cmd) {
-      const gp = decision.gatherPriority;
+      const gp = { ...decision.gatherPriority };
+      if (stk.food < 30) gp.food = Math.max(gp.food || 0, 0.9);
+      if (stk.wood < 20) gp.wood = Math.max(gp.wood || 0, 0.8);
       const types = ["wood", "stone", "gold", "food"];
       types.sort((a, b) => (gp[b] || 0) - (gp[a] || 0));
       for (const gt of types) {
@@ -152,7 +221,6 @@ function applyNeuralDecision(api, decision, player, state) {
     commands.push(cmd);
   }
 
-  // Validate and apply
   const valid = commands.filter(c => validateCommand(c, player, state));
   if (valid.length > 0) applyCommands(valid, player);
 }

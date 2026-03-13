@@ -56,42 +56,37 @@ export function tickBotPlayer(player, state, grid) {
     return null;
   };
 
-  // Auto-build
-  if (tick % 80 === 0 && player.stockpile.wood >= 30) {
-    const houses = player.buildings.filter(b => b.type === "house" && b.built).length;
-    if (houses < 5 && pop >= popCap - 1) {
-      const spot = findSpot(BLD.house.size || 2, 5);
-      if (spot) {
-        player.stockpile.wood -= 30;
-        player.buildings.push({
-          id: state.nextUid++, type: "house",
-          x: spot.x, y: spot.y,
-          hp: BLD.house.hp, maxHp: BLD.house.hp, built: true,
-        });
-      }
-    } else if (player.buildings.filter(b => b.type === "farm" && b.built).length < 2 && player.stockpile.wood >= 20) {
-      const spot = findSpot(BLD.farm.size || 2, 4);
-      if (spot) {
-        player.stockpile.wood -= 20;
-        player.buildings.push({
-          id: state.nextUid++, type: "farm",
-          x: spot.x, y: spot.y,
-          hp: BLD.farm.hp, maxHp: BLD.farm.hp, built: true,
-        });
-      }
-    } else if (player.buildings.filter(b => b.type === "tower" && b.built).length < 2
-      && player.stockpile.stone >= 40 && player.stockpile.gold >= 10) {
-      const spot = findSpot(BLD.tower.size || 1, 5);
-      if (spot) {
-        player.stockpile.stone -= 40;
-        player.stockpile.gold -= 10;
-        player.buildings.push({
-          id: state.nextUid++, type: "tower",
-          x: spot.x, y: spot.y,
-          hp: BLD.tower.hp, maxHp: BLD.tower.hp, built: true,
-        });
-      }
-    }
+  // Auto-build with smart progression
+  const builtOf = (type) => player.buildings.filter(b => b.type === type && b.built).length;
+  const stk = player.stockpile;
+
+  const tryBuild = (type) => {
+    const bd = BLD[type];
+    if (!bd) return false;
+    const cost = bd.cost;
+    if (!Object.entries(cost).every(([r, a]) => (stk[r] || 0) >= a)) return false;
+    const spot = findSpot(bd.size || 2, 6);
+    if (!spot) return false;
+    Object.entries(cost).forEach(([r, a]) => { stk[r] -= a; });
+    player.buildings.push({
+      id: state.nextUid++, type,
+      x: spot.x, y: spot.y,
+      hp: bd.hp, maxHp: bd.hp, built: true,
+    });
+    return true;
+  };
+
+  if (tick % 60 === 0) {
+    // Priority build order for bot
+    if (builtOf("farm") < 1) tryBuild("farm");
+    else if (builtOf("barracks") < 1) tryBuild("barracks");
+    else if (pop >= popCap - 1 && builtOf("house") < 5) tryBuild("house");
+    else if (builtOf("workshop") < 1 && builtOf("barracks") >= 1) tryBuild("workshop");
+    else if (builtOf("farm") < Math.ceil(pop / 5) && builtOf("farm") < 4) tryBuild("farm");
+    else if (builtOf("market") < 1 && builtOf("workshop") >= 1) tryBuild("market");
+    else if (builtOf("tower") < 2 && builtOf("workshop") >= 1) tryBuild("tower");
+    else if (builtOf("barracks") < 2 && pop >= 10) tryBuild("barracks");
+    else if (pop >= popCap - 1 && builtOf("house") < 6) tryBuild("house");
   }
 
   // Farm income
