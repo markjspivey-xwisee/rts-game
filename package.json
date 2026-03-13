@@ -14,6 +14,7 @@
     "dev": "concurrently \"npm run dev:server\" \"npm run dev:client\"",
     "dev:server": "cd server && node index.js",
     "dev:client": "cd client && npx vite",
+    "build": "cd client && npx vite build",
     "start": "cd server && node index.js"
   },
   "devDependencies": {
