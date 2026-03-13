@@ -100,8 +100,9 @@ export function tickGame(gs) {
 
     // Food upkeep
     player.stockpile.food -= pop * 0.04;
-    if (player.stockpile.food < -20) {
-      for (const v of aliveUnits) v.hp -= 1;
+    if (player.stockpile.food < 0) {
+      player.stockpile.food = 0;
+      for (const v of aliveUnits) v.hp -= 0.5;
       if (s.tick % 30 === 0) {
         s.log.push(`[${s.tick}] ⚠ ${player.name}: Starvation!`);
       }
