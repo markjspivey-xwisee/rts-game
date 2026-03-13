@@ -750,42 +750,58 @@ export default function Game({ gameId, playerId, token, onLeave }) {
     </div>
   );
 
-  // Training controls
+  // Training controls — runs in a worker thread on the server, client polls status
+  const pollRef = useRef(null);
+
+  const pollTraining = useCallback((sid) => {
+    if (pollRef.current) clearInterval(pollRef.current);
+    pollRef.current = setInterval(async () => {
+      try {
+        const res = await fetch(`/api/training/${sid}/status`);
+        const data = await res.json();
+        setTrainState(s => ({
+          ...s,
+          gen: data.generation,
+          history: data.history,
+          bestWeights: data.bestWeights,
+          running: data.running,
+        }));
+        if (!data.running) clearInterval(pollRef.current);
+      } catch (_) { /* ignore poll errors */ }
+    }, 2000);
+  }, []);
+
   const startTraining = useCallback(async () => {
     try {
       const res = await fetch("/api/training/start", {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ populationSize: 30, gamesPerNet: 3, maxTicks: 1000 }),
+        body: JSON.stringify({ populationSize: 20, gamesPerNet: 2, maxTicks: 600 }),
       });
       const data = await res.json();
       setTrainState(s => ({ ...s, sessionId: data.sessionId, gen: 0, history: [], running: true }));
-      runGeneration(data.sessionId);
+      // Start training in worker thread
+      await fetch(`/api/training/${data.sessionId}/run`, { method: "POST" });
+      pollTraining(data.sessionId);
     } catch (e) { console.error("Training start failed:", e); }
-  }, []);
-
-  const runGeneration = useCallback(async (sid) => {
-    try {
-      const res = await fetch(`/api/training/${sid}/run`, {
-        method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ generations: 1 }),
-      });
-      const data = await res.json();
-      setTrainState(s => {
-        const hist = [...s.history, ...data.generations];
-        const newState = { ...s, gen: hist.length, history: hist, bestWeights: data.bestWeights };
-        // Auto-continue if still running
-        if (s.running && s.sessionId) setTimeout(() => runGeneration(s.sessionId), 50);
-        return newState;
-      });
-    } catch (e) { console.error("Training generation failed:", e); }
-  }, []);
+  }, [pollTraining]);
 
   const stopTraining = useCallback(async () => {
+    if (pollRef.current) clearInterval(pollRef.current);
     setTrainState(s => ({ ...s, running: false }));
     if (trainState.sessionId) {
       await fetch(`/api/training/${trainState.sessionId}/stop`, { method: "POST" }).catch(() => {});
     }
   }, [trainState.sessionId]);
+
+  const resumeTraining = useCallback(async () => {
+    if (!trainState.sessionId) return;
+    setTrainState(s => ({ ...s, running: true }));
+    await fetch(`/api/training/${trainState.sessionId}/run`, { method: "POST" }).catch(() => {});
+    pollTraining(trainState.sessionId);
+  }, [trainState.sessionId, pollTraining]);
+
+  // Cleanup poll on unmount
+  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); }, []);
 
   const loadWeightsToScript = useCallback(() => {
     if (!trainState.bestWeights) return;
@@ -823,7 +839,7 @@ export default function Game({ gameId, playerId, token, onLeave }) {
             {trainState.running ? (
               <button onClick={stopTraining} style={{ ...btn, color: "#c44" }}>⏹ Stop</button>
             ) : (
-              <button onClick={() => { setTrainState(s => ({ ...s, running: true })); runGeneration(trainState.sessionId); }}
+              <button onClick={resumeTraining}
                 style={{ ...btn, background: "#2a4a2a", color: "#8c8" }}>▶ Resume</button>
             )}
           </div>

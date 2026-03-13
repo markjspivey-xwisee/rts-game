@@ -1,11 +1,16 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  TRAINING API - Neuroevolution training endpoints
+//  TRAINING API - Neuroevolution training endpoints (Worker thread based)
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { Router } from "express";
-import { Population, runTrainingGame, scoreFitness } from "../../shared/training.js";
+import { Worker } from "worker_threads";
+import { fileURLToPath } from "url";
+import { dirname, join } from "path";
 import { NeuralNet } from "../../shared/neural.js";
 import { DEFAULT_LAYERS } from "../../shared/features.js";
+
+const __dirname = dirname(fileURLToPath(import.meta.url));
+const WORKER_PATH = join(__dirname, "../../server/training-worker.js");
 
 const router = Router();
 
@@ -14,66 +19,106 @@ const sessions = new Map();
 
 /**
  * POST /api/training/start
- * Start a new training session.
+ * Start a new training session and immediately begin first generation.
  * Body: { populationSize?, layers?, mutationRate?, mutationStrength?, gamesPerNet?, maxTicks? }
  */
 router.post("/start", (req, res) => {
   const {
-    populationSize = 30,
+    populationSize = 20,
     layers,
     mutationRate = 0.1,
     mutationStrength = 0.3,
-    gamesPerNet = 3,
-    maxTicks = 1000,
+    gamesPerNet = 2,
+    maxTicks = 600,
   } = req.body || {};
 
   const id = `train_${Date.now()}`;
-  const pop = new Population({
-    size: populationSize,
-    layers: layers || [...DEFAULT_LAYERS],
-    mutationRate,
-    mutationStrength,
-  });
 
   const session = {
     id,
-    pop,
-    gamesPerNet,
-    maxTicks,
+    config: {
+      populationSize,
+      layers: layers || [...DEFAULT_LAYERS],
+      mutationRate,
+      mutationStrength,
+      gamesPerNet,
+      maxTicks,
+    },
+    populationJSON: null,
     running: false,
     generation: 0,
     history: [],
     bestWeights: null,
+    worker: null,
   };
 
   sessions.set(id, session);
-  res.json({ sessionId: id, populationSize, layers: pop.layers, paramCount: new NeuralNet(pop.layers).paramCount() });
+  res.json({
+    sessionId: id,
+    populationSize,
+    layers: session.config.layers,
+    paramCount: new NeuralNet(session.config.layers).paramCount(),
+  });
 });
 
 /**
+ * Spawn a worker to run one generation.
+ */
+function runGenerationWorker(session) {
+  if (session.worker) return;
+  session.running = true;
+
+  const worker = new Worker(WORKER_PATH, {
+    workerData: {
+      config: session.config,
+      populationJSON: session.populationJSON,
+    },
+  });
+
+  session.worker = worker;
+
+  worker.on("message", (msg) => {
+    session.generation = msg.result.generation;
+    session.history.push(msg.result);
+    session.bestWeights = msg.bestWeights;
+    session.populationJSON = msg.populationJSON;
+    session.worker = null;
+
+    // Auto-continue if still flagged as running
+    if (session.running) {
+      setImmediate(() => runGenerationWorker(session));
+    }
+  });
+
+  worker.on("error", (err) => {
+    console.error(`[Training ${session.id}] Worker error:`, err.message);
+    session.worker = null;
+    session.running = false;
+  });
+
+  worker.on("exit", (code) => {
+    if (code !== 0 && session.worker) {
+      console.error(`[Training ${session.id}] Worker exited with code ${code}`);
+      session.worker = null;
+      session.running = false;
+    }
+  });
+}
+
+/**
  * POST /api/training/:id/run
- * Run N generations synchronously (blocking — use for small pops or from a worker).
- * Body: { generations?: number }
+ * Start running generations in background worker thread.
  */
 router.post("/:id/run", (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
-  const generations = Math.min(req.body?.generations || 1, 50);
-  session.running = true;
-
-  const results = [];
-  for (let i = 0; i < generations; i++) {
-    const result = session.pop.runGeneration(session.gamesPerNet, session.maxTicks);
-    session.generation = result.generation;
-    session.history.push(result);
-    results.push(result);
+  if (!session.running) {
+    session.running = true;
+    runGenerationWorker(session);
   }
 
-  session.bestWeights = session.pop.getBest().toJSON();
-  session.running = false;
-
-  res.json({ generations: results, bestWeights: session.bestWeights });
+  res.json({ started: true, generation: session.generation });
 });
 
 /**
@@ -89,7 +134,7 @@ router.get("/:id/status", (req, res) => {
     generation: session.generation,
     running: session.running,
     history: session.history.slice(-20),
-    hasBestWeights: !!session.bestWeights,
+    bestWeights: session.bestWeights,
   });
 });
 
@@ -101,39 +146,41 @@ router.get("/:id/best", (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
-  const best = session.pop.getBest();
-  res.json({ weights: best.toJSON() });
+  if (!session.bestWeights) return res.status(404).json({ error: "No weights yet" });
+  res.json({ weights: session.bestWeights });
 });
 
 /**
  * POST /api/training/:id/stop
- * Stop and delete a training session.
+ * Stop training.
  */
 router.post("/:id/stop", (req, res) => {
   const session = sessions.get(req.params.id);
   if (!session) return res.status(404).json({ error: "Session not found" });
 
-  sessions.delete(req.params.id);
+  session.running = false;
+  if (session.worker) {
+    try { session.worker.terminate(); } catch (_) { /* ignore */ }
+    session.worker = null;
+  }
+
   res.json({ stopped: true, finalGeneration: session.generation, bestWeights: session.bestWeights });
 });
 
 /**
- * POST /api/training/evaluate
- * Run a single game between two sets of weights.
- * Body: { weightsA: {...}, weightsB: {...}, maxTicks? }
+ * DELETE /api/training/:id
+ * Delete a training session.
  */
-router.post("/evaluate", (req, res) => {
-  const { weightsA, weightsB, maxTicks = 1200 } = req.body || {};
-  if (!weightsA || !weightsB) return res.status(400).json({ error: "Need weightsA and weightsB" });
+router.delete("/:id", (req, res) => {
+  const session = sessions.get(req.params.id);
+  if (!session) return res.status(404).json({ error: "Session not found" });
 
-  try {
-    const netA = NeuralNet.fromJSON(weightsA);
-    const netB = NeuralNet.fromJSON(weightsB);
-    const result = runTrainingGame(netA, netB, maxTicks);
-    res.json(result);
-  } catch (err) {
-    res.status(400).json({ error: err.message });
+  session.running = false;
+  if (session.worker) {
+    try { session.worker.terminate(); } catch (_) { /* ignore */ }
   }
+  sessions.delete(req.params.id);
+  res.json({ deleted: true });
 });
 
 /**
@@ -143,7 +190,7 @@ router.post("/evaluate", (req, res) => {
 router.get("/sessions", (_req, res) => {
   const list = [];
   for (const [id, s] of sessions) {
-    list.push({ id, generation: s.generation, running: s.running, popSize: s.pop.size });
+    list.push({ id, generation: s.generation, running: s.running, popSize: s.config.populationSize });
   }
   res.json(list);
 });
