@@ -6,6 +6,8 @@ import { Router } from "express";
 import { createGamesRouter } from "./routes/games.js";
 import { createCommandsRouter } from "./routes/commands.js";
 import { createStateRouter } from "./routes/state.js";
+import { createReplayRouter } from "./routes/replay.js";
+import { createWeightsRouter } from "./routes/weights.js";
 import trainingRouter from "./routes/training.js";
 
 /**
@@ -19,6 +21,8 @@ export function createApiRouter(lobby) {
   router.use("/api/games", createGamesRouter(lobby));
   router.use("/api/games", createCommandsRouter(lobby));
   router.use("/api/games", createStateRouter(lobby));
+  router.use("/api/games", createReplayRouter(lobby));
+  router.use("/api/weights", createWeightsRouter());
   router.use("/api/training", trainingRouter);
 
   return router;

@@ -2,7 +2,7 @@
 //  HTTP Client for RTS Game API
 // ═══════════════════════════════════════════════════════════════════════════
 
-const BASE_URL = process.env.RTS_API_URL || "http://localhost:3000";
+const BASE_URL = process.env.RTS_SERVER_URL || process.env.RTS_API_URL || "http://localhost:3000";
 
 /** Stores tokens per gameId */
 const tokens = new Map();

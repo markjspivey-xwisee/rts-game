@@ -143,6 +143,24 @@ const TOOLS = [
       required: ["game_id", "code"],
     },
   },
+  {
+    name: "get_resources",
+    description: "Get your current resource stockpile, income rates, and visible resource nodes on the map.",
+    inputSchema: {
+      type: "object",
+      properties: { game_id: { type: "string" } },
+      required: ["game_id"],
+    },
+  },
+  {
+    name: "get_tech_tree",
+    description: "Get your current tech status: what's unlocked, what buildings you need for further upgrades.",
+    inputSchema: {
+      type: "object",
+      properties: { game_id: { type: "string" } },
+      required: ["game_id"],
+    },
+  },
 ];
 
 // ── Handlers ──────────────────────────────────────────────────────────────
@@ -238,6 +256,16 @@ server.setRequestHandler(CallToolRequestSchema, async (request) => {
         const data = await api.submitScript(args.game_id, args.code);
         if (data.error) return text(`Script error: ${data.error}`);
         return text(`Script compiled and deployed! It will run every tick automatically.`);
+      }
+
+      case "get_resources": {
+        const state = await api.getState(args.game_id);
+        return text(formatResources(state));
+      }
+
+      case "get_tech_tree": {
+        const state = await api.getState(args.game_id);
+        return text(formatTech(state));
       }
 
       default:
@@ -369,6 +397,65 @@ function formatMap(s) {
       out += `  - #${r.id} at (${r.x},${r.y}) amount:${Math.floor(r.amount)}\n`;
     }
   }
+  return out;
+}
+
+function formatResources(s) {
+  if (!s) return "No state";
+  const stk = s.myStockpile || {};
+  const delta = s.stkDelta || {};
+  let out = `## Your Stockpile\n`;
+  out += `| Resource | Amount | Rate/tick |\n|----------|--------|-----------|\n`;
+  for (const r of ["wood", "stone", "gold", "food"]) {
+    out += `| ${r} | ${Math.floor(stk[r] || 0)} | ${(delta[r] || 0) >= 0 ? "+" : ""}${(delta[r] || 0).toFixed(2)} |\n`;
+  }
+  out += `\n## Visible Resource Nodes\n`;
+  const resByType = {};
+  for (const r of (s.resources || [])) {
+    if (!resByType[r.type]) resByType[r.type] = [];
+    resByType[r.type].push(r);
+  }
+  for (const [type, rs] of Object.entries(resByType)) {
+    out += `\n**${type}** (${rs.length} nodes):\n`;
+    for (const r of rs.slice(0, 8)) {
+      out += `- #${r.id} at (${r.x},${r.y})${r.amount ? ` amount:${Math.floor(r.amount)}` : ""}\n`;
+    }
+    if (rs.length > 8) out += `- ... and ${rs.length - 8} more\n`;
+  }
+  return out;
+}
+
+function formatTech(s) {
+  if (!s) return "No state";
+  const tech = s.myTech || [];
+  const buildings = s.myBuildings || [];
+  const bTypes = new Set(buildings.filter(b => b.built !== false).map(b => b.type));
+
+  let out = `## Tech Tree Status\n\n`;
+  out += `### Unlocked Tech\n`;
+  if (tech.length === 0) out += `- None yet\n`;
+  else for (const t of tech) out += `- ${t}\n`;
+
+  out += `\n### Buildings\n`;
+  const allTypes = ["house", "farm", "barracks", "workshop", "tower", "market", "bridge"];
+  for (const bt of allTypes) {
+    const count = buildings.filter(b => b.type === bt).length;
+    const built = count > 0 ? `${count} built` : "not built";
+    out += `- ${bt}: ${built}\n`;
+  }
+
+  out += `\n### Tech Requirements\n`;
+  out += `- warrior_training: Build a Barracks (50w, 20s)\n`;
+  out += `- tower: Build a Workshop (40w, 30s) → enables Tower construction\n`;
+  out += `- trade: Build a Market (30w, 15g) → +0.08 gold/tick\n`;
+
+  out += `\n### Crafting (requires buildings)\n`;
+  out += `- Sword (Barracks): 20s, 10g → +3 damage for warriors\n`;
+  out += `- Iron Axe (Workshop): 15s → +50% gather speed for lumberjacks\n`;
+  out += `- Iron Pickaxe (Workshop): 15s → +50% gather speed for miners\n`;
+  out += `- Sickle (Workshop): 10s, 5g → +50% gather speed for farmers\n`;
+  out += `- Shield (Barracks): 25s, 5g → +15 max HP for warriors\n`;
+
   return out;
 }
 

@@ -64,10 +64,15 @@ const DEFAULT_SCRIPT = `// Script RTS - Neural Net AI
 function update(api) {
   const { villagers, enemies, resources, stockpile, tc, buildings, tick, memory, tech, popCap, items } = api;
 
-  // ── Initialize neural net (random weights, or paste trained weights below) ──
+  // ── Initialize neural net ──
+  // Tries to load pre-trained weights from the weight library, falls back to random.
   if (!memory.net) {
-    memory.net = api.neural.create(); // [45, 32, 16, 13] default
-    // To load trained weights: memory.net = api.neural.load(WEIGHTS_JSON);
+    if (memory._defaultWeights) {
+      memory.net = api.neural.load(memory._defaultWeights);
+    } else {
+      memory.net = api.neural.create(); // random [45, 32, 16, 13]
+    }
+    // To load custom weights: memory.net = api.neural.load(WEIGHTS_JSON);
   }
 
   // ── Run neural net every 5 ticks for strategic decisions ──
@@ -181,6 +186,17 @@ export default function Game({ gameId, playerId, token, onLeave }) {
 
   const [script, setScript] = useState(DEFAULT_SCRIPT);
   const [sErr, setSErr] = useState(null);
+  const [defaultWeights, setDefaultWeights] = useState(null);
+
+  // Fetch pre-trained default weights on mount
+  useEffect(() => {
+    fetch("/api/weights/default")
+      .then(r => r.ok ? r.json() : null)
+      .then(data => {
+        if (data?.weights) setDefaultWeights(data.weights);
+      })
+      .catch(() => {});
+  }, []);
   const [selUnit, setSelUnit] = useState(null);
   const [selBld, setSelBld] = useState(null);
   const [showS, setShowS] = useState(true);
@@ -351,11 +367,16 @@ export default function Game({ gameId, playerId, token, onLeave }) {
     try {
       new Function("api", script + "\nif(typeof update==='function')update(api);");
       setSErr(null);
-      sendScript(script);
+      // Inject default weights into memory before the script runs
+      let fullScript = script;
+      if (defaultWeights) {
+        fullScript = `// Auto-inject pre-trained weights into memory\nif(!api.memory._defaultWeights)api.memory._defaultWeights=${JSON.stringify(defaultWeights)};\n\n` + script;
+      }
+      sendScript(fullScript);
     } catch (e) {
       setSErr(e.message);
     }
-  }, [script, sendScript]);
+  }, [script, sendScript, defaultWeights]);
 
   // Auto-compile default script when first connected
   const autoCompiled = useRef(false);

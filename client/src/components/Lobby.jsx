@@ -16,6 +16,8 @@ export default function Lobby({ onJoinGame }) {
   const [lobbyPlayers, setLobbyPlayers] = useState([]);
   const [err, setErr] = useState(null);
   const [tab, setTab] = useState("play");
+  const [weightsList, setWeightsList] = useState([]);
+  const [uploadForm, setUploadForm] = useState({ name: "", description: "", json: "" });
 
   useEffect(() => {
     const load = async () => {
@@ -29,6 +31,19 @@ export default function Lobby({ onJoinGame }) {
     const iv = setInterval(load, 3000);
     return () => clearInterval(iv);
   }, []);
+
+  // Load weights when tab switches to weights
+  useEffect(() => {
+    if (tab !== "weights") return;
+    const loadWeights = async () => {
+      try {
+        const res = await fetch(`${API}/weights`);
+        const data = await res.json();
+        setWeightsList(data.weights || []);
+      } catch {}
+    };
+    loadWeights();
+  }, [tab]);
 
   useEffect(() => {
     if (!waiting) return;
@@ -97,6 +112,48 @@ export default function Lobby({ onJoinGame }) {
         method: "POST", headers: { Authorization: `Bearer ${waiting.token}` },
       });
       onJoinGame(waiting.gameId, waiting.playerId, waiting.token);
+    } catch (e) { setErr(e.message); }
+  };
+
+  const uploadWeights = async () => {
+    if (!uploadForm.name.trim() || !uploadForm.json.trim()) {
+      setErr("Name and weights JSON required");
+      return;
+    }
+    try {
+      const weights = JSON.parse(uploadForm.json);
+      const res = await fetch(`${API}/weights`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          name: uploadForm.name.trim(),
+          author: name.trim() || "Anonymous",
+          description: uploadForm.description.trim(),
+          weights,
+        }),
+      });
+      const data = await res.json();
+      if (data.id) {
+        setUploadForm({ name: "", description: "", json: "" });
+        setErr(null);
+        // Refresh list
+        const r2 = await fetch(`${API}/weights`);
+        const d2 = await r2.json();
+        setWeightsList(d2.weights || []);
+      } else { setErr(data.error || "Upload failed"); }
+    } catch (e) { setErr("Invalid JSON: " + e.message); }
+  };
+
+  const downloadWeights = async (id) => {
+    try {
+      const res = await fetch(`${API}/weights/${id}`);
+      const data = await res.json();
+      const blob = new Blob([JSON.stringify(data.weights, null, 2)], { type: "application/json" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `${data.name.replace(/[^a-zA-Z0-9_-]/g, "_")}.json`;
+      a.click();
+      URL.revokeObjectURL(url);
     } catch (e) { setErr(e.message); }
   };
 
@@ -201,6 +258,8 @@ curl -X POST ${host}/api/games \\
       {/* Tabs */}
       <div style={{ display: "flex", gap: 4, marginBottom: 0, maxWidth: "95vw", width: 600, flexWrap: "wrap" }}>
         {tabBtn("play", "Play")}
+        {tabBtn("watch", "Watch")}
+        {tabBtn("weights", "Weights")}
         {tabBtn("agents", "Agents")}
         {tabBtn("api", "API")}
         {tabBtn("mcp", "MCP")}
@@ -323,6 +382,14 @@ api.pathDist(a,b) // Manhattan distance`}</pre>
               ["POST", "/api/games/:id/commands", "Send commands (auth)"],
               ["POST", "/api/games/:id/script", "Submit script (auth)"],
               ["WS",   "/?gameId=...&token=...", "Real-time WebSocket"],
+              ["WS",   "/?gameId=...&spectate=true", "Spectate (no auth)"],
+              [null],
+              ["GET",  "/api/games/:id/replay", "Download replay"],
+              ["GET",  "/api/games/:id/spectate", "Spectator snapshot"],
+              [null],
+              ["GET",  "/api/weights", "List shared weights"],
+              ["GET",  "/api/weights/:id", "Download weights"],
+              ["POST", "/api/weights", "Upload weights"],
               [null],
               ["POST", "/api/training/start", "Start training"],
               ["POST", "/api/training/:id/run", "Begin evolution"],
@@ -391,6 +458,122 @@ api.pathDist(a,b) // Manhattan distance`}</pre>
           <pre style={code}>{`git clone https://github.com/markjspivey-xwisee/rts-game.git
 cd rts-game/mcp-server && npm install
 RTS_SERVER_URL=${host} node index.js --stdio`}</pre>
+        </div>
+      )}
+
+      {/* WATCH */}
+      {tab === "watch" && (
+        <div style={card}>
+          <h2 style={h2s}>Watch Live Games</h2>
+          <p style={dim}>Spectate ongoing games in real-time or replay finished matches.</p>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>LIVE GAMES</h3>
+          {games.filter(g => g.status === "playing").length === 0 && (
+            <p style={{ color: "#555", fontSize: 12 }}>No games in progress right now.</p>
+          )}
+          {games.filter(g => g.status === "playing").map(g => (
+            <div key={g.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 3, marginBottom: 6 }}>
+              <div>
+                <span style={{ color: "#c9a825" }}>{g.id.substring(0, 8)}</span>
+                <span style={{ color: "#888", fontSize: 11, marginLeft: 8 }}>
+                  {g.players?.map(p => p.name).join(" vs ")}
+                </span>
+              </div>
+              <a href={`/?spectate=${g.id}`} style={{ ...B, padding: "4px 12px", textDecoration: "none" }}>
+                Spectate
+              </a>
+            </div>
+          ))}
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>FINISHED GAMES</h3>
+          {games.filter(g => g.status === "finished").length === 0 && (
+            <p style={{ color: "#555", fontSize: 12 }}>No finished games with replays.</p>
+          )}
+          {games.filter(g => g.status === "finished").map(g => (
+            <div key={g.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "8px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 3, marginBottom: 6 }}>
+              <div>
+                <span style={{ color: "#888" }}>{g.id.substring(0, 8)}</span>
+                <span style={{ color: "#888", fontSize: 11, marginLeft: 8 }}>
+                  {g.players?.map(p => p.name).join(" vs ")}
+                </span>
+              </div>
+              <a href={`/?replay=${g.id}`} style={{ ...B, padding: "4px 12px", textDecoration: "none" }}>
+                Replay
+              </a>
+            </div>
+          ))}
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>VIA API</h3>
+          <pre style={code}>{`# Spectate via WebSocket (no auth needed)
+ws://${host.replace(/^https?:\/\//, "")}/?gameId=<id>&spectate=true
+
+# Get replay data
+curl ${host}/api/games/<id>/replay
+
+# Get spectator snapshot
+curl ${host}/api/games/<id>/spectate`}</pre>
+        </div>
+      )}
+
+      {/* WEIGHTS */}
+      {tab === "weights" && (
+        <div style={card}>
+          <h2 style={h2s}>Weight Library</h2>
+          <p style={dim}>Share and download trained neural net weights. Load them into your script to play with pre-trained strategies.</p>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>AVAILABLE WEIGHTS</h3>
+          {weightsList.length === 0 && (
+            <p style={{ color: "#555", fontSize: 12 }}>No weights shared yet. Train some and upload!</p>
+          )}
+          {weightsList.map(w => (
+            <div key={w.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center",
+              padding: "10px 12px", background: "rgba(255,255,255,0.03)", borderRadius: 3, marginBottom: 6 }}>
+              <div>
+                <div style={{ color: "#c9a825", fontSize: 13 }}>{w.name}</div>
+                <div style={{ color: "#555", fontSize: 10 }}>
+                  by {w.author} | fitness: {(w.fitness || 0).toFixed(0)} | gen: {w.generations || "?"} | {w.downloads || 0} downloads
+                </div>
+                {w.description && <div style={{ color: "#666", fontSize: 10, marginTop: 2 }}>{w.description}</div>}
+              </div>
+              <button onClick={() => downloadWeights(w.id)} style={{ ...B, padding: "4px 12px" }}>
+                Download
+              </button>
+            </div>
+          ))}
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>UPLOAD WEIGHTS</h3>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            <input value={uploadForm.name} onChange={e => setUploadForm(f => ({ ...f, name: e.target.value }))}
+              placeholder="Weight set name (e.g. Aggressive Rush v3)"
+              style={{ padding: "6px 10px", background: "#0d110d", color: "#a0c898", border: "1px solid #3a4030",
+                borderRadius: 3, fontFamily: "'Courier New',monospace", fontSize: 12 }} />
+            <input value={uploadForm.description} onChange={e => setUploadForm(f => ({ ...f, description: e.target.value }))}
+              placeholder="Description (optional)"
+              style={{ padding: "6px 10px", background: "#0d110d", color: "#a0c898", border: "1px solid #3a4030",
+                borderRadius: 3, fontFamily: "'Courier New',monospace", fontSize: 12 }} />
+            <textarea value={uploadForm.json} onChange={e => setUploadForm(f => ({ ...f, json: e.target.value }))}
+              placeholder='Paste weights JSON here (from training export or weights.json file)'
+              rows={4}
+              style={{ padding: "6px 10px", background: "#0d110d", color: "#a0c898", border: "1px solid #3a4030",
+                borderRadius: 3, fontFamily: "'Courier New',monospace", fontSize: 11, resize: "vertical" }} />
+            <button onClick={uploadWeights} style={{ ...B, background: "#2a4a2a", color: "#8f8", textAlign: "center" }}>
+              Upload Weights
+            </button>
+          </div>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>HOW TO USE</h3>
+          <pre style={code}>{`// In your script, load downloaded weights:
+if (!memory.net) {
+  memory.net = api.neural.load(PASTE_WEIGHTS_JSON_HERE);
+}
+
+// Via API:
+curl ${host}/api/weights          # List all
+curl ${host}/api/weights/default  # Download default
+curl -X POST ${host}/api/weights  # Upload new`}</pre>
+          {err && <p style={{ color: "#f44", fontSize: 12, marginTop: 8 }}>{err}</p>}
         </div>
       )}
 

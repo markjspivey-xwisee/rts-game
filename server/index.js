@@ -5,13 +5,14 @@
 import { createServer } from "http";
 import { fileURLToPath } from "url";
 import { dirname, join } from "path";
-import { readFileSync } from "fs";
+import { readFileSync, existsSync } from "fs";
 import express from "express";
 import cors from "cors";
 
 const __dirname = dirname(fileURLToPath(import.meta.url));
 import { Lobby } from "./lobby.js";
 import { createApiRouter } from "../api/index.js";
+import { registerDefaultWeights } from "../api/routes/weights.js";
 import { setupWebSocket } from "./ws-handler.js";
 
 const PORT = process.env.PORT || 3000;
@@ -64,7 +65,15 @@ app.get("/api/docs", (_req, res) => {
       get_state: "GET /api/games/:id/state [Auth: Bearer token]",
       send_commands: "POST /api/games/:id/commands [Auth: Bearer token]",
       submit_script: "POST /api/games/:id/script [Auth: Bearer token]",
+      get_replay: "GET /api/games/:id/replay",
+      spectate_snapshot: "GET /api/games/:id/spectate",
       websocket: "WS /?gameId=...&token=...",
+      spectate_ws: "WS /?gameId=...&spectate=true",
+    },
+    weights_api: {
+      list: "GET /api/weights",
+      download: "GET /api/weights/:id",
+      upload: "POST /api/weights { name, author, description, weights }",
     },
     training_api: {
       start: "POST /api/training/start { populationSize, gamesPerNet, maxTicks }",
@@ -205,6 +214,22 @@ const server = createServer(app);
 
 // Set up WebSocket handler
 setupWebSocket(server, lobby);
+
+// Load default weights if available
+const defaultWeightsPath = join(__dirname, "..", "shared", "default-weights.json");
+if (existsSync(defaultWeightsPath)) {
+  try {
+    const weights = JSON.parse(readFileSync(defaultWeightsPath, "utf-8"));
+    registerDefaultWeights(weights, {
+      name: "Default (Pre-trained)",
+      description: "Pre-trained via 30-gen neuroevolution. Good all-round strategy.",
+      fitness: 2574,
+      generations: 30,
+    });
+  } catch (e) {
+    console.warn("[Server] Could not load default weights:", e.message);
+  }
+}
 
 server.listen(PORT, () => {
   console.log(`[Server] RTS game server running on port ${PORT}`);

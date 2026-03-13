@@ -35,6 +35,14 @@ export class GameRoom {
     this.tickInterval = null;
     this.commandQueues = new Map();
     this.scriptFns = new Map();
+
+    // Replay recording: snapshot every REPLAY_INTERVAL ticks
+    this.replayFrames = [];
+    this.replayInterval = 5; // record every 5 ticks
+    this.replayMeta = null; // { players, config, startedAt }
+
+    // Spectators: WebSocket connections that receive all-player view
+    this.spectators = new Set();
   }
 
   /**
@@ -141,6 +149,14 @@ export class GameRoom {
     this.state = initGame(gameConfig);
     this.status = "playing";
 
+    // Initialize replay metadata
+    this.replayMeta = {
+      gameId: this.id,
+      players: this.playerSlots.map(s => ({ id: s.id, name: s.name, type: s.type })),
+      config: this.config,
+      startedAt: Date.now(),
+    };
+
     console.log(`[GameRoom ${this.id}] Game started with ${this.playerSlots.length} players`);
 
     this.tickInterval = setInterval(() => {
@@ -194,11 +210,21 @@ export class GameRoom {
     // Advance game state (tickGame returns new state)
     this.state = tickGame(this.state);
 
-    // Broadcast updated views
+    // Record replay frame at interval
+    if (this.state.tick % this.replayInterval === 0) {
+      this._recordFrame();
+    }
+
+    // Broadcast updated views to players and spectators
     this.broadcastState();
+    this._broadcastSpectators();
 
     // Check game over
     if (this.state.gameOver) {
+      this.replayMeta.endedAt = Date.now();
+      this.replayMeta.winner = this.state.winner;
+      this.replayMeta.ticks = this.state.tick;
+      this._recordFrame(); // final frame
       console.log(`[GameRoom ${this.id}] Game over. Winner: ${this.state.winner}`);
       this.status = "finished";
       this.stop();
@@ -440,6 +466,122 @@ export class GameRoom {
   }
 
   /**
+   * Record a compact replay frame from current state.
+   */
+  _recordFrame() {
+    if (!this.state) return;
+    const frame = {
+      tick: this.state.tick,
+      players: this.state.players.map(p => ({
+        id: p.id,
+        eliminated: p.eliminated,
+        stockpile: { ...p.stockpile },
+        tcHp: p.tc?.hp ?? 0,
+        popCap: p.popCap,
+        units: p.units.filter(u => u.alive).map(u => ({
+          id: u.id, x: u.x, y: u.y, hp: u.hp, spec: u.spec, cmd: u.cmd,
+        })),
+        buildings: p.buildings.map(b => ({
+          id: b.id, type: b.type, x: b.x, y: b.y, hp: b.hp, built: b.built,
+        })),
+      })),
+      resources: this.state.resources.filter(r => r.amount > 0).map(r => ({
+        id: r.id, type: r.type, x: r.x, y: r.y,
+      })),
+      gameOver: this.state.gameOver,
+      winner: this.state.winner,
+    };
+    this.replayFrames.push(frame);
+  }
+
+  /**
+   * Get the recorded replay data.
+   */
+  getReplay() {
+    return {
+      meta: this.replayMeta,
+      frames: this.replayFrames,
+    };
+  }
+
+  /**
+   * Broadcast spectator view (full map, all players visible).
+   */
+  _broadcastSpectators() {
+    if (this.spectators.size === 0) return;
+    const data = this._buildSpectatorView();
+    const msg = JSON.stringify({ type: "state", data });
+    for (const ws of this.spectators) {
+      if (ws.readyState === 1) {
+        try { ws.send(msg); } catch (_) { /* ignore */ }
+      } else {
+        this.spectators.delete(ws);
+      }
+    }
+  }
+
+  /**
+   * Build a full spectator view (no fog of war).
+   */
+  _buildSpectatorView() {
+    if (!this.state) return null;
+    return {
+      tick: this.state.tick,
+      spectator: true,
+      mapWidth: this.state.mapWidth,
+      mapHeight: this.state.mapHeight,
+      players: this.state.players.map(p => ({
+        id: p.id, name: p.name, color: p.color, eliminated: p.eliminated,
+        stockpile: { ...p.stockpile },
+        tcHp: p.tc?.hp ?? 0,
+        tc: p.tc ? { x: p.tc.x, y: p.tc.y, hp: p.tc.hp, maxHp: p.tc.maxHp } : null,
+        unitCount: p.units.filter(u => u.alive).length,
+        buildingCount: p.buildings.length,
+        popCap: p.popCap,
+      })),
+      allUnits: this.state.players.flatMap(p =>
+        p.units.filter(u => u.alive).map(u => ({
+          id: u.id, owner: p.id, x: u.x, y: u.y, hp: u.hp, maxHp: u.maxHp,
+          spec: u.spec, cmd: u.cmd,
+        }))
+      ),
+      allBuildings: this.state.players.flatMap(p =>
+        p.buildings.map(b => ({
+          id: b.id, owner: p.id, type: b.type, x: b.x, y: b.y, hp: b.hp,
+          maxHp: b.maxHp, built: b.built,
+        }))
+      ),
+      resources: this.state.resources.filter(r => r.amount > 0).map(r => ({
+        id: r.id, type: r.type, x: r.x, y: r.y,
+      })),
+      gameOver: this.state.gameOver,
+      winner: this.state.winner,
+    };
+  }
+
+  /**
+   * Add a spectator WebSocket.
+   * @param {import("ws").WebSocket} ws
+   */
+  addSpectator(ws) {
+    this.spectators.add(ws);
+    console.log(`[GameRoom ${this.id}] Spectator connected (${this.spectators.size} total)`);
+
+    // Send current state immediately
+    if (this.state) {
+      try {
+        ws.send(JSON.stringify({ type: "state", data: this._buildSpectatorView() }));
+      } catch (_) { /* ignore */ }
+    }
+
+    ws.on("close", () => {
+      this.spectators.delete(ws);
+      console.log(`[GameRoom ${this.id}] Spectator disconnected`);
+    });
+    ws.on("error", () => this.spectators.delete(ws));
+  }
+
+  /**
    * Stop the game loop and notify all players.
    */
   stop() {
@@ -457,6 +599,18 @@ export class GameRoom {
               winner: this.state?.winner ?? null,
               stats: this.state?.players?.map(p => ({ id: p.id, stats: p.stats })) ?? [],
             },
+          }));
+        } catch (_) { /* ignore */ }
+      }
+    }
+
+    // Notify spectators
+    for (const ws of this.spectators) {
+      if (ws.readyState === 1) {
+        try {
+          ws.send(JSON.stringify({
+            type: "gameOver",
+            data: { winner: this.state?.winner ?? null },
           }));
         } catch (_) { /* ignore */ }
       }

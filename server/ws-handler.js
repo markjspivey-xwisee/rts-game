@@ -20,8 +20,9 @@ export function setupWebSocket(server, lobby) {
       const url = new URL(req.url, `http://${req.headers.host}`);
       const gameId = url.searchParams.get("gameId");
       const token = url.searchParams.get("token");
+      const spectate = url.searchParams.get("spectate");
 
-      if (!gameId || !token) {
+      if (!gameId) {
         socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
         socket.destroy();
         return;
@@ -30,6 +31,20 @@ export function setupWebSocket(server, lobby) {
       const room = lobby.getGame(gameId);
       if (!room) {
         socket.write("HTTP/1.1 404 Not Found\r\n\r\n");
+        socket.destroy();
+        return;
+      }
+
+      // Spectator mode: no auth needed
+      if (spectate === "true" || spectate === "1") {
+        wss.handleUpgrade(req, socket, head, (ws) => {
+          wss.emit("connection", ws, req, { gameId, playerId: null, spectator: true });
+        });
+        return;
+      }
+
+      if (!token) {
+        socket.write("HTTP/1.1 400 Bad Request\r\n\r\n");
         socket.destroy();
         return;
       }
@@ -52,10 +67,18 @@ export function setupWebSocket(server, lobby) {
   });
 
   // Handle new connections
-  wss.on("connection", (ws, _req, { gameId, playerId, token }) => {
+  wss.on("connection", (ws, _req, { gameId, playerId, token, spectator }) => {
     const room = lobby.getGame(gameId);
     if (!room) {
       ws.close(4004, "Game not found");
+      return;
+    }
+
+    // Spectator: add to spectator list, no commands
+    if (spectator) {
+      room.addSpectator(ws);
+      ws.isAlive = true;
+      ws.on("pong", () => { ws.isAlive = true; });
       return;
     }
 
