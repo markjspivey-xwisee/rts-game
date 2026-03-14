@@ -3,9 +3,10 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { Router } from "express";
+import { createPersistentStore } from "../../server/persistence.js";
 
-// In-memory ELO store (resets on server restart — use a DB for persistence)
-const playerElo = new Map(); // name -> { elo, wins, losses, games, lastPlayed }
+// Persistent ELO store (survives server restarts)
+const playerElo = createPersistentStore("leaderboard.json"); // name -> { elo, wins, losses, games, lastPlayed }
 
 const DEFAULT_ELO = 1000;
 const K_FACTOR = 32;
@@ -47,6 +48,11 @@ export function recordMatch(winnerName, loserName) {
   loser.games++;
   winner.lastPlayed = Date.now();
   loser.lastPlayed = Date.now();
+
+  // Persist updated records
+  playerElo.set(winnerName, winner);
+  playerElo.set(loserName, loser);
+  playerElo.forceSave();
 }
 
 /**
@@ -58,7 +64,7 @@ export function createLeaderboardRouter(lobby) {
 
   // GET /api/leaderboard - Get sorted leaderboard
   router.get("/", (_req, res) => {
-    const entries = [...playerElo.entries()]
+    const entries = playerElo.entries()
       .map(([name, data]) => ({ name, ...data }))
       .sort((a, b) => b.elo - a.elo);
     res.json({ leaderboard: entries });
@@ -70,7 +76,8 @@ export function createLeaderboardRouter(lobby) {
     if (!playerElo.has(name)) {
       return res.status(404).json({ error: "Player not found" });
     }
-    res.json({ name, ...playerElo.get(name) });
+    const data = playerElo.get(name);
+    res.json({ name, ...data });
   });
 
   return router;

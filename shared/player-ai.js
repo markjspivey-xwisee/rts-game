@@ -108,9 +108,14 @@ export function tickBotPlayer(player, state, grid) {
     else if (builtOf("tower") < 2 && builtOf("workshop") >= 1) tryBuild("tower");
     // Castle Age buildings
     else if (builtOf("temple") < 1 && ageIdx >= 2) tryBuild("temple");
+    else if (builtOf("monastery") < 1 && ageIdx >= 2) tryBuild("monastery");
     else if (builtOf("castle_tower") < 1 && ageIdx >= 2 && builtOf("workshop") >= 1) tryBuild("castle_tower");
     else if (builtOf("barracks") < 2 && pop >= 10) tryBuild("barracks");
     else if (pop >= popCap - 1 && builtOf("house") < 6) tryBuild("house");
+    // Imperial Age buildings
+    else if (builtOf("university") < 1 && ageIdx >= 3) tryBuild("university");
+    // Dock for naval units
+    else if (builtOf("dock") < 1 && ageIdx >= 1) tryBuild("dock");
     // Walls around TC
     else if (builtOf("wall") < 4 && tick > 200) tryBuild("wall");
   }
@@ -135,6 +140,31 @@ export function tickBotPlayer(player, state, grid) {
             player.navalUnits.push(nu);
           }
         }
+      }
+    }
+  }
+
+  // Relic collection: send a unit to pick up free relics
+  if (state.relics && state.relics.length > 0 && (player.tech || []).includes("faith")) {
+    const freeRelic = state.relics.find(r => !r.carrier && !r.housedBy);
+    if (freeRelic) {
+      const nearUnit = aliveUnits.filter(u => !u.raiding)
+        .sort((a, b) => D(a, freeRelic) - D(b, freeRelic))[0];
+      if (nearUnit && D(nearUnit, freeRelic) < 20) {
+        const n = astar(nearUnit.x, nearUnit.y, freeRelic.x, freeRelic.y, grid, 80);
+        if (n) { nearUnit.x = n.x; nearUnit.y = n.y; }
+      }
+    }
+  }
+
+  // Healing: units with healer spec move toward wounded friendlies
+  for (const ev of aliveUnits) {
+    if (ev.spec === "healer" && !ev.raiding) {
+      const wounded = aliveUnits.filter(u => u.id !== ev.id && u.hp < (u.maxHp || 20))
+        .sort((a, b) => D(a, ev) - D(b, ev))[0];
+      if (wounded && D(ev, wounded) < 10) {
+        const n = astar(ev.x, ev.y, wounded.x, wounded.y, grid, 80);
+        if (n) { ev.x = n.x; ev.y = n.y; }
       }
     }
   }

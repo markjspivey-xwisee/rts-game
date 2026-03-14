@@ -172,6 +172,36 @@ export default function Spectate({ mode, gameId, onBack }) {
       }
     }
 
+    // Draw relics on map
+    if (state.relics) {
+      for (const r of state.relics) {
+        ctx.fillStyle = "#c9a825";
+        ctx.beginPath();
+        ctx.arc(r.x * TILE + TILE / 2, r.y * TILE + TILE / 2, 5, 0, Math.PI * 2);
+        ctx.fill();
+        ctx.strokeStyle = "#fff";
+        ctx.lineWidth = 1;
+        ctx.stroke();
+      }
+    }
+
+    // Draw naval units on map
+    if (state.navalUnits) {
+      for (const n of state.navalUnits) {
+        const pi = parseInt(n.owner?.replace("p", "") || "1") - 1;
+        ctx.fillStyle = PLAYER_COLORS[pi];
+        ctx.beginPath();
+        ctx.moveTo(n.x * TILE, n.y * TILE + TILE);
+        ctx.lineTo(n.x * TILE + TILE / 2, n.y * TILE);
+        ctx.lineTo(n.x * TILE + TILE, n.y * TILE + TILE);
+        ctx.closePath();
+        ctx.fill();
+        ctx.strokeStyle = "#4488cc";
+        ctx.lineWidth = 1.5;
+        ctx.stroke();
+      }
+    }
+
     // Game over overlay
     if (state.gameOver) {
       ctx.fillStyle = "rgba(0,0,0,0.6)";
@@ -214,6 +244,9 @@ export default function Spectate({ mode, gameId, onBack }) {
           {state.players.map((p, i) => (
             <div key={p.id} style={{ fontSize: 11, opacity: p.eliminated ? 0.4 : 1 }}>
               <span style={{ color: PLAYER_COLORS[i], fontWeight: "bold" }}>{p.name || p.id}</span>
+              <span style={{ color: "#c9a825", marginLeft: 4, fontSize: 10, border: "1px solid #555", borderRadius: 2, padding: "0 3px" }}>
+                {{ dark: "D", feudal: "F", castle: "C", imperial: "I" }[p.age] || "D"}
+              </span>
               {p.stockpile && (
                 <span style={{ color: "#666", marginLeft: 6 }}>
                   W:{Math.floor(p.stockpile.wood)} S:{Math.floor(p.stockpile.stone)} G:{Math.floor(p.stockpile.gold)} F:{Math.floor(p.stockpile.food)}
@@ -222,6 +255,8 @@ export default function Spectate({ mode, gameId, onBack }) {
               <span style={{ color: "#555", marginLeft: 6 }}>
                 {p.unitCount ?? (p.units?.length ?? "?")} units
               </span>
+              {p.relicCount > 0 && <span style={{ color: "#c9a825", marginLeft: 6 }}>Relics:{p.relicCount}</span>}
+              {p.navalCount > 0 && <span style={{ color: "#4488cc", marginLeft: 6 }}>Naval:{p.navalCount}</span>}
               {p.eliminated && <span style={{ color: "#f44", marginLeft: 6 }}>ELIMINATED</span>}
             </div>
           ))}

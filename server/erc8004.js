@@ -23,6 +23,7 @@
 import { Router } from "express";
 import { createHash } from "crypto";
 import { linkAgentId, getProfile } from "./wallet-auth.js";
+import { createPersistentStore } from "./persistence.js";
 
 // ERC-8004 contract ABIs (minimal interfaces for interaction)
 const IDENTITY_REGISTRY_ABI = [
@@ -71,8 +72,8 @@ const RPC_URL = process.env.ERC8004_RPC_URL || (isMainnet ? "https://mainnet.bas
 const CHAIN_ID = process.env.ERC8004_CHAIN_ID || (isMainnet ? "8453" : "84532");
 const SERVER_PRIVATE_KEY = process.env.SERVER_WALLET_PRIVATE_KEY || null;
 
-// In-memory agent registry (mirrors on-chain for fast lookups)
-const agentRegistry = new Map(); // agentId -> { wallet, uri, elo, matches }
+// Persistent agent registry (survives server restarts)
+const agentRegistry = createPersistentStore("agents.json"); // agentId -> { wallet, uri, elo, matches }
 
 let provider = null;
 let signer = null;
@@ -205,6 +206,7 @@ async function registerAgent(walletAddress, metadata = {}) {
   };
 
   agentRegistry.set(localId, agent);
+  agentRegistry.forceSave();
   linkAgentId(walletAddress, localId);
 
   // Attempt on-chain registration (non-blocking for the API response)
@@ -213,6 +215,8 @@ async function registerAgent(walletAddress, metadata = {}) {
       if (chainId) {
         agent.onChain = true;
         agent.chainAgentId = chainId;
+        agentRegistry.set(localId, agent);
+        agentRegistry.forceSave();
       }
     });
   }
@@ -233,6 +237,7 @@ export function recordAgentMatch(winnerAgentId, loserAgentId, gameId) {
     winner.matches.push({ gameId, result: "win", opponent: loserAgentId, time: Date.now() });
     const expectedWin = 1 / (1 + Math.pow(10, ((loser?.elo || 1000) - winner.elo) / 400));
     winner.elo += Math.round(32 * (1 - expectedWin));
+    agentRegistry.set(winnerAgentId, winner);
   }
 
   if (loser) {
@@ -240,7 +245,10 @@ export function recordAgentMatch(winnerAgentId, loserAgentId, gameId) {
     loser.matches.push({ gameId, result: "loss", opponent: winnerAgentId, time: Date.now() });
     const expectedLoss = 1 / (1 + Math.pow(10, ((winner?.elo || 1000) - loser.elo) / 400));
     loser.elo += Math.round(32 * (0 - expectedLoss));
+    agentRegistry.set(loserAgentId, loser);
   }
+
+  agentRegistry.forceSave();
 
   // Post on-chain reputation feedback (fire-and-forget)
   if (erc8004Enabled && reputationContract) {
@@ -268,7 +276,7 @@ export function createERC8004Router() {
     }
 
     // Check if already registered
-    for (const [, agent] of agentRegistry) {
+    for (const [, agent] of agentRegistry.entries()) {
       if (agent.wallet === walletAddress.toLowerCase()) {
         return res.json({ agent, message: "Already registered" });
       }
@@ -295,7 +303,7 @@ export function createERC8004Router() {
 
   // GET /api/agents - List all registered agents
   router.get("/", (_req, res) => {
-    const agents = [...agentRegistry.values()].map(a => ({
+    const agents = agentRegistry.values().map(a => ({
       agentId: a.agentId,
       name: a.name,
       wallet: a.wallet,
@@ -385,7 +393,7 @@ export function createERC8004Router() {
   // GET /api/agents/by-wallet/:address - Look up agent by wallet
   router.get("/by-wallet/:address", (req, res) => {
     const addr = req.params.address.toLowerCase();
-    for (const [, agent] of agentRegistry) {
+    for (const [, agent] of agentRegistry.entries()) {
       if (agent.wallet === addr) {
         return res.json(agent);
       }

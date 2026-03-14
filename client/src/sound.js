@@ -50,4 +50,41 @@ export const SFX = {
       setTimeout(() => tone(f, 0.3, 0.1, "sawtooth"), i * 200)
     );
   },
+  heal: () => {
+    try {
+      const c = au();
+      const o = c.createOscillator();
+      const g = c.createGain();
+      o.type = "sine";
+      o.frequency.setValueAtTime(400, c.currentTime);
+      o.frequency.linearRampToValueAtTime(600, c.currentTime + 0.15);
+      g.gain.setValueAtTime(0.06, c.currentTime);
+      g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.15);
+      o.connect(g).connect(c.destination);
+      o.start();
+      o.stop(c.currentTime + 0.15);
+    } catch (_) {}
+  },
+  naval: () => tone(120, 0.3, 0.1, "sawtooth"),
+  ageUp: () => {
+    try {
+      const c = au();
+      [523, 659, 784].forEach((f, i) => {
+        const o = c.createOscillator();
+        const g = c.createGain();
+        o.type = "sine";
+        o.frequency.setValueAtTime(f, c.currentTime);
+        o.frequency.linearRampToValueAtTime(f * 1.1, c.currentTime + 0.5);
+        g.gain.setValueAtTime(0.08, c.currentTime);
+        g.gain.exponentialRampToValueAtTime(0.001, c.currentTime + 0.5);
+        o.connect(g).connect(c.destination);
+        o.start();
+        o.stop(c.currentTime + 0.5);
+      });
+    } catch (_) {}
+  },
+  relic: () => {
+    tone(880, 0.2, 0.08, "sine");
+    setTimeout(() => tone(1100, 0.2, 0.06, "sine"), 60);
+  },
 };

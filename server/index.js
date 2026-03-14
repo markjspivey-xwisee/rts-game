@@ -28,6 +28,35 @@ const app = express();
 app.use(cors());
 app.use(express.json({ limit: "5mb" }));
 
+// Simple rate limiter: 100 requests per minute per IP
+const rateLimits = new Map();
+app.use((req, res, next) => {
+  const ip = req.ip || req.connection.remoteAddress;
+  const now = Date.now();
+  const windowMs = 60000;
+  const max = 100;
+
+  if (!rateLimits.has(ip)) rateLimits.set(ip, []);
+  const hits = rateLimits.get(ip).filter(t => t > now - windowMs);
+  hits.push(now);
+  rateLimits.set(ip, hits);
+
+  if (hits.length > max) {
+    return res.status(429).json({ error: "Too many requests, try again later" });
+  }
+  next();
+});
+
+// Clean up rate limit entries every 5 minutes
+setInterval(() => {
+  const now = Date.now();
+  for (const [ip, hits] of rateLimits) {
+    const recent = hits.filter(t => t > now - 60000);
+    if (recent.length === 0) rateLimits.delete(ip);
+    else rateLimits.set(ip, recent);
+  }
+}, 300000);
+
 // Initialize crypto systems
 await initX402();
 await initERC8004();

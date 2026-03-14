@@ -3,6 +3,7 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { Router } from "express";
+import { loadData, saveData } from "./persistence.js";
 
 const SEASON_DURATION_MS = 30 * 24 * 60 * 60 * 1000; // 30 days
 
@@ -14,9 +15,14 @@ const RANKS = {
   diamond:  { name: "Diamond",  min: 1700, max: Infinity, icon: "💎" },
 };
 
-// Season state
-const pastSeasons = [];
-let currentSeason = null;
+// Season state (loaded from persistent storage)
+const savedRanked = loadData("ranked.json", { pastSeasons: [], currentSeason: null });
+const pastSeasons = savedRanked.pastSeasons;
+let currentSeason = savedRanked.currentSeason;
+
+function persistRankedData() {
+  saveData("ranked.json", { pastSeasons, currentSeason });
+}
 
 /**
  * Get rank tier from ELO.
@@ -37,6 +43,7 @@ function ensureSeason() {
 
   if (!currentSeason) {
     currentSeason = createSeason(1, now);
+    persistRankedData();
     return currentSeason;
   }
 
@@ -60,6 +67,8 @@ function ensureSeason() {
         peakElo: resetElo,
       };
     }
+
+    persistRankedData();
   }
 
   return currentSeason;
@@ -109,6 +118,8 @@ export function recordRankedMatch(winnerName, loserName) {
   l.rank = getRank(l.elo);
 
   if (w.elo > w.peakElo) w.peakElo = w.elo;
+
+  persistRankedData();
 }
 
 /**

@@ -4,3 +4,4 @@ dist/
 *.log
 scripts/checkpoint-*.json
 scripts/population.json
+data/

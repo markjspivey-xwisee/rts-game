@@ -86,7 +86,8 @@ const DEFAULT_SCRIPT = `// Script RTS - Neural Net + Smart Heuristic AI
 // Commands: v.cmd = "gather"|"attack"|"build"|"moveTo"|"ability"|"idle"|"craft"|"mount"|"dismount"|"crew"|"uncrew"
 
 function update(api) {
-  const { villagers, enemies, resources, stockpile, tc, buildings, tick, memory, tech, popCap, items } = api;
+  const { villagers, enemies, resources, stockpile, tc, buildings, tick, memory, tech, popCap, items,
+        horses, vehicles, navalUnits, relics, age, ageProgress, diplomacy, players, enemyTc } = api;
 
   // ── Initialize neural net ──
   if (!memory.net) {
@@ -116,6 +117,10 @@ function update(api) {
     house: { wood: 30 }, farm: { wood: 20 }, barracks: { wood: 50, stone: 20 },
     tower: { stone: 40, gold: 10 }, workshop: { wood: 40, stone: 30 },
     market: { wood: 30, gold: 15 }, bridge: { wood: 15, stone: 10 },
+    stable: { wood: 40, food: 20 }, dock: { wood: 50 },
+    temple: { stone: 60, gold: 40 }, monastery: { wood: 80, stone: 50, gold: 30 },
+    university: { wood: 60, stone: 40, gold: 60 },
+    castle_tower: { stone: 80, gold: 30 },
   };
   const canAfford = (type) => {
     const c = BLD_COST[type];
@@ -162,6 +167,13 @@ function update(api) {
   // Phase 6: Additional barracks for more warriors
   if (barracksCount > 0 && barracksCount < 2 && alive.length >= 10 && !pendingOf("barracks")) smartBuildQueue.push("barracks");
 
+  // Phase 7: Age-gated buildings
+  if (age !== "dark" && !hasOrPending("stable")) smartBuildQueue.push("stable");
+  if (age !== "dark" && !hasOrPending("dock") && resources.some(r => r.type === "food")) smartBuildQueue.push("dock");
+  if ((age === "castle" || age === "imperial") && !hasOrPending("temple")) smartBuildQueue.push("temple");
+  if ((age === "castle" || age === "imperial") && !hasOrPending("monastery")) smartBuildQueue.push("monastery");
+  if (age === "imperial" && !hasOrPending("university")) smartBuildQueue.push("university");
+
   // Merge neural net build orders (filtered) with smart queue
   const netBuilds = (d.buildOrders || []).filter(b => {
     // Block excessive houses
@@ -172,6 +184,43 @@ function update(api) {
 
   // Smart queue takes priority, then neural net suggestions
   const finalBuildQueue = [...new Set([...smartBuildQueue, ...netBuilds])];
+
+  // ── AGE ADVANCEMENT ──
+  if (age === "dark" && tick > 200 && stockpile.food >= 200 && stockpile.gold >= 100) {
+    api.advanceAge();
+  }
+  if (age === "feudal" && tick > 500 && stockpile.food >= 400 && stockpile.gold >= 200) {
+    api.advanceAge();
+  }
+  if (age === "castle" && tick > 800 && stockpile.food >= 600 && stockpile.gold >= 400) {
+    api.advanceAge();
+  }
+
+  // ── NAVAL TRAINING ──
+  if (navalUnits && buildings.some(b => b.type === "dock" && b.built)) {
+    const fishingBoats = navalUnits.filter(n => n.type === "fishing_boat").length;
+    const warships = navalUnits.filter(n => n.type === "warship").length;
+    if (fishingBoats < 2 && stockpile.wood >= 40) api.trainNaval("fishing_boat");
+    else if (warships < 1 && stockpile.wood >= 80 && stockpile.gold >= 40) api.trainNaval("warship");
+  }
+
+  // ── RELIC COLLECTION ──
+  if (relics && relics.length > 0 && tech.includes("faith")) {
+    const freeRelic = relics.find(r => !r.heldBy);
+    if (freeRelic) {
+      const nearestMil = alive.filter(v => v.tag === "mil" && !v.cmd)
+        .sort((a, b) => api.pathDist(a, freeRelic) - api.pathDist(b, freeRelic))[0];
+      if (nearestMil) {
+        api.pickupRelic([nearestMil.id], freeRelic.id);
+      }
+    }
+  }
+
+  // ── FORMATIONS: set formation when attacking in groups ──
+  if (d.shouldAttack && milCount >= 4) {
+    const milUnits = alive.filter(v => v.tag === "mil").map(v => v.id);
+    if (milUnits.length >= 4) api.setFormation(milUnits, "wedge");
+  }
 
   for (const v of alive) {
     // ── Tag assignment: 2-3 builders, rest split by neural net ──
@@ -260,6 +309,15 @@ function update(api) {
         }
       }
       if (v.cmd === "build") continue;
+    }
+
+    // ── HEALER: heal nearby wounded friendlies ──
+    if (v.spec === "healer") {
+      const wounded = alive.filter(u => u.id !== v.id && u.hp < u.maxHp)
+        .sort((a, b) => api.pathDist(a, v) - api.pathDist(b, v))[0];
+      if (wounded && api.pathDist(v, wounded) < 8) {
+        v.cmd = "moveTo"; v.moveX = wounded.x; v.moveY = wounded.y; continue;
+      }
     }
 
     // ── STRATEGIC: Gather priority from neural net ──
@@ -453,6 +511,56 @@ export default function Game({ gameId, playerId, token, onLeave }) {
         if (bld) { setSelBld(bld); setSelUnit(null); }
         else if (clickedTc) { setSelBld({ ...tc, type: "tc", _isTc: true }); setSelUnit(null); }
         else { setSelUnit(null); setSelBld(null); }
+      }
+    }
+    dragRef.current = null;
+  }, [view]);
+
+  // Touch handlers for mobile
+  const onTS = useCallback((e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    if (t) {
+      dragRef.current = { x: t.clientX, y: t.clientY, cx: camRef.current.x, cy: camRef.current.y, moved: false };
+    }
+  }, []);
+
+  const onTM = useCallback((e) => {
+    e.preventDefault();
+    const t = e.touches[0];
+    if (dragRef.current && t) {
+      const dx = t.clientX - dragRef.current.x;
+      const dy = t.clientY - dragRef.current.y;
+      if (Math.abs(dx) > 3 || Math.abs(dy) > 3) dragRef.current.moved = true;
+      camRef.current = { x: dragRef.current.cx - dx, y: dragRef.current.cy - dy };
+    }
+  }, []);
+
+  const onTE = useCallback((e) => {
+    e.preventDefault();
+    if (dragRef.current && !dragRef.current.moved && view) {
+      const rect = cvRef.current.getBoundingClientRect();
+      const Z = T * zoomRef.current;
+      const touch = e.changedTouches[0];
+      if (touch) {
+        const mx = Math.floor((touch.clientX - rect.left + camRef.current.x) / Z);
+        const my = Math.floor((touch.clientY - rect.top + camRef.current.y) / Z);
+
+        const unit = (view.myUnits || []).find(v => v.x === mx && v.y === my && v.alive);
+        if (unit) {
+          setSelUnit(unit.id);
+          setSelBld(null);
+        } else {
+          const bld = (view.myBuildings || []).find(b => {
+            const sz = BLD_SIZE[b.type] || (BLD[b.type]?.size) || 1;
+            return mx >= b.x && mx < b.x + sz && my >= b.y && my < b.y + sz;
+          });
+          const tc = view.myTc;
+          const clickedTc = tc && mx >= tc.x - 1 && mx < tc.x + 2 && my >= tc.y - 1 && my < tc.y + 2;
+          if (bld) { setSelBld(bld); setSelUnit(null); }
+          else if (clickedTc) { setSelBld({ ...tc, type: "tc", _isTc: true }); setSelUnit(null); }
+          else { setSelUnit(null); setSelBld(null); }
+        }
       }
     }
     dragRef.current = null;
@@ -1204,6 +1312,7 @@ export default function Game({ gameId, playerId, token, onLeave }) {
             flex: 1, display: mTab === "map" ? "flex" : "none", flexDirection: "column",
           }}
             onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}
+            onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}
             onContextMenu={e => e.preventDefault()}>
             <canvas ref={cvRef} style={{ width: "100%", height: "100%", display: "block", cursor: "grab" }} />
             <canvas ref={mnRef} width={110} height={77} onClick={onMiniClick}
@@ -1267,6 +1376,7 @@ export default function Game({ gameId, playerId, token, onLeave }) {
         <div ref={zoomCanvasRef}
           style={{ position: "relative", overflow: "hidden", touchAction: "none", flex: 1 }}
           onMouseDown={onMD} onMouseMove={onMM} onMouseUp={onMU} onMouseLeave={onMU}
+          onTouchStart={onTS} onTouchMove={onTM} onTouchEnd={onTE}
           onContextMenu={e => e.preventDefault()}>
           <canvas ref={cvRef} style={{ width: "100%", height: "100%", display: "block", cursor: "grab" }} />
           <canvas ref={mnRef} width={150} height={105} onClick={onMiniClick}

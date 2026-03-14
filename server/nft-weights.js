@@ -16,6 +16,7 @@
 
 import { Router } from "express";
 import { createHash } from "crypto";
+import { createPersistentStore, loadData, saveData } from "./persistence.js";
 
 // Pinata IPFS configuration
 const PINATA_JWT = process.env.PINATA_JWT || null;
@@ -26,10 +27,14 @@ const PINATA_GATEWAY = "https://gateway.pinata.cloud/ipfs";
 
 const ipfsEnabled = !!PINATA_JWT;
 
-// In-memory NFT registry (stores metadata + CID, not full weights when IPFS is available)
-const weightNFTs = new Map(); // tokenId -> NFTMetadata
+// Persistent NFT registry (survives server restarts)
+const weightNFTs = createPersistentStore("nft-weights.json"); // tokenId -> NFTMetadata
 
-let nextTokenId = 1;
+// Recover nextTokenId from existing data
+let nextTokenId = (() => {
+  const keys = weightNFTs.keys().map(Number).filter(n => !isNaN(n));
+  return keys.length > 0 ? Math.max(...keys) + 1 : 1;
+})();
 
 /**
  * Compute a local content hash for weights (fallback when Pinata isn't configured).
@@ -135,6 +140,7 @@ async function mintWeightNFT(ownerAddress, weights, metadata = {}) {
   };
 
   weightNFTs.set(tokenId, nft);
+  weightNFTs.forceSave();
   return nft;
 }
 
@@ -177,7 +183,7 @@ export function createNFTWeightsRouter() {
 
   // GET /api/nft-weights - List all weight NFTs
   router.get("/", (_req, res) => {
-    const nfts = [...weightNFTs.values()].map(n => ({
+    const nfts = weightNFTs.values().map(n => ({
       tokenId: n.tokenId,
       owner: n.owner,
       name: n.name,
@@ -206,6 +212,7 @@ export function createNFTWeightsRouter() {
     if (!nft) return res.status(404).json({ error: "NFT not found" });
 
     nft.downloads++;
+    weightNFTs.set(req.params.id, nft);
 
     // Resolve weights: use local cache if available, otherwise fetch from IPFS
     let weights = nft.weights;
@@ -250,6 +257,8 @@ export function createNFTWeightsRouter() {
     const { price } = req.body;
     nft.listed = true;
     nft.price = price || "$1.00";
+    weightNFTs.set(req.params.id, nft);
+    weightNFTs.forceSave();
 
     res.json({
       tokenId: nft.tokenId,
@@ -268,6 +277,8 @@ export function createNFTWeightsRouter() {
     const earning = { amount: amount || 0, source: source || "tournament", gameId, time: Date.now() };
     nft.tba.earnings.push(earning);
     nft.tba.balance += earning.amount;
+    weightNFTs.set(req.params.id, nft);
+    weightNFTs.forceSave();
 
     res.json({
       tokenId: nft.tokenId,

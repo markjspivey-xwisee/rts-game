@@ -405,6 +405,13 @@ export class GameRoom {
       },
       nearbyEnemies: (u, r) => api.enemies.filter(e => D(u, e) <= r),
       pathDist: D,
+      // Helper commands for non-unit actions
+      advanceAge: () => { player._pendingCmds = player._pendingCmds || []; player._pendingCmds.push({ action: "advance_age" }); },
+      trainNaval: (type) => { player._pendingCmds = player._pendingCmds || []; player._pendingCmds.push({ action: "train_naval", naval_type: type }); },
+      setDiplomacy: (targetId, status) => { player._pendingCmds = player._pendingCmds || []; player._pendingCmds.push({ action: "set_diplomacy", target_player_id: targetId, status }); },
+      tribute: (targetId, resource, amount) => { player._pendingCmds = player._pendingCmds || []; player._pendingCmds.push({ action: "tribute", target_player_id: targetId, resource, amount }); },
+      pickupRelic: (unitIds, relicId) => { player._pendingCmds = player._pendingCmds || []; player._pendingCmds.push({ action: "pickup_relic", unitIds, target_id: relicId }); },
+      setFormation: (unitIds, formation) => { player._pendingCmds = player._pendingCmds || []; player._pendingCmds.push({ action: "formation", unitIds, formation }); },
     };
 
     scriptFn(api);

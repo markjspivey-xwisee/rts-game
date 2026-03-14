@@ -5,11 +5,12 @@
 import { Router } from "express";
 import { v4 as uuidv4 } from "uuid";
 import { agentRegistry, recordAgentMatch } from "./erc8004.js";
+import { loadData, saveData } from "./persistence.js";
 
 const TOURNAMENT_INTERVAL_MS = parseInt(process.env.TOURNAMENT_INTERVAL_MS || String(6 * 60 * 60 * 1000), 10);
 
-// Scheduled tournament history
-const scheduledHistory = [];
+// Scheduled tournament history (loaded from persistent storage)
+const scheduledHistory = loadData("tournament-history.json", []);
 let nextRunTime = null;
 let schedulerTimer = null;
 let lobbyRef = null;
@@ -37,7 +38,7 @@ export function startScheduler(lobby) {
  */
 function collectParticipants() {
   const participants = [];
-  for (const [, agent] of agentRegistry) {
+  for (const [, agent] of agentRegistry.entries()) {
     participants.push({
       agentId: agent.agentId,
       name: agent.name,
@@ -155,11 +156,13 @@ async function runScheduledTournament() {
     }
 
     console.log(`[ScheduledTournament] Tournament ${tournamentId} finished. Winner: ${entry.winner}`);
+    saveData("tournament-history.json", scheduledHistory);
     return entry;
   } catch (err) {
     entry.status = "error";
     entry.error = err.message;
     entry.finishedAt = Date.now();
+    saveData("tournament-history.json", scheduledHistory);
     console.error(`[ScheduledTournament] Tournament ${tournamentId} failed:`, err);
     return entry;
   }
