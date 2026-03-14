@@ -287,6 +287,8 @@ export default function Lobby({ onJoinGame }) {
     minHeight: "100vh", background: "#0f1410", color: "#c8c0a8",
     fontFamily: "'Courier New',monospace", padding: "20px 0",
     display: "flex", flexDirection: "column", alignItems: "center",
+    overflowY: "auto", overflowX: "hidden",
+    WebkitOverflowScrolling: "touch",
   };
   const card = {
     background: "#1a1e16", border: "1px solid #2a3020", borderRadius: 6,

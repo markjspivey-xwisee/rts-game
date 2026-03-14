@@ -293,6 +293,12 @@ export default function Game({ gameId, playerId, token, onLeave }) {
   const [sErr, setSErr] = useState(null);
   const [defaultWeights, setDefaultWeights] = useState(null);
 
+  // Lock scrolling while in-game
+  useEffect(() => {
+    document.body.classList.add("in-game");
+    return () => document.body.classList.remove("in-game");
+  }, []);
+
   // Fetch pre-trained default weights on mount
   useEffect(() => {
     fetch("/api/weights/default")
