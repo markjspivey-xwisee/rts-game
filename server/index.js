@@ -15,15 +15,35 @@ import { createApiRouter } from "../api/index.js";
 import { registerDefaultWeights } from "../api/routes/weights.js";
 import { setupWebSocket } from "./ws-handler.js";
 import { sharedReplays } from "../api/routes/replay.js";
+import { initX402, createPaymentMiddleware, getX402Config } from "./x402-payments.js";
+import { createWalletAuthRouter } from "./wallet-auth.js";
+import { initERC8004, createERC8004Router } from "./erc8004.js";
+import { createNFTWeightsRouter } from "./nft-weights.js";
 
 const PORT = process.env.PORT || 3000;
 
 const app = express();
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: "5mb" }));
+
+// Initialize crypto systems
+await initX402();
+await initERC8004();
 
 // Create lobby
 const lobby = new Lobby();
+
+// Mount x402 payment middleware (gates premium routes)
+app.use(createPaymentMiddleware());
+
+// Mount wallet auth routes
+app.use("/api/auth", createWalletAuthRouter());
+
+// Mount ERC-8004 agent routes
+app.use("/api/agents", createERC8004Router());
+
+// Mount NFT weights routes
+app.use("/api/nft-weights", createNFTWeightsRouter());
 
 // Mount API routes
 app.use(createApiRouter(lobby));
@@ -35,6 +55,11 @@ app.use(express.static(clientDist));
 // Health check
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", games: lobby.games.size });
+});
+
+// x402 payment config
+app.get("/api/payments/config", (_req, res) => {
+  res.json(getX402Config());
 });
 
 // Shared replay lookup by code
@@ -109,6 +134,28 @@ app.get("/api/docs", (_req, res) => {
       status: "GET /api/training/:id/status",
       best_weights: "GET /api/training/:id/best",
       stop: "POST /api/training/:id/stop",
+    },
+    crypto_api: {
+      x402_config: "GET /api/payments/config - Payment tiers and pricing",
+      wallet_nonce: "GET /api/auth/nonce?address=0x... - Request signing nonce",
+      wallet_verify: "POST /api/auth/verify { address, signature, nonce } - Get token via wallet",
+      wallet_profile: "GET /api/auth/profile?address=0x... - Wallet profile",
+      register_agent: "POST /api/agents/register { walletAddress, name } - Register ERC-8004 agent",
+      list_agents: "GET /api/agents - All registered agents",
+      agent_detail: "GET /api/agents/:id - Agent details + match history",
+      agent_reputation: "GET /api/agents/:id/reputation - On-chain reputation summary",
+      agent_by_wallet: "GET /api/agents/by-wallet/:address - Lookup by wallet",
+      erc8004_config: "GET /api/agents/config/info - ERC-8004 contract addresses + ABIs",
+      mint_weights: "POST /api/nft-weights/mint { ownerAddress, weights, name } - Mint weights NFT",
+      list_nfts: "GET /api/nft-weights - All weight NFTs",
+      nft_detail: "GET /api/nft-weights/:id - NFT + weights download",
+      list_nft: "POST /api/nft-weights/:id/list { price } - List NFT for sale",
+    },
+    standards: {
+      x402: "HTTP 402 Payment Required - AI agent micropayments via USDC",
+      erc8004: "Trustless Agents - On-chain identity, reputation, validation",
+      erc6551: "Token Bound Accounts - NFTs with their own wallets",
+      eip191: "personal_sign - Wallet signature authentication",
     },
     map_themes: ["default", "desert", "island", "forest", "arena"],
     ages: ["dark", "feudal", "castle", "imperial"],

@@ -282,6 +282,7 @@ curl -X POST ${host}/api/games \\
         {tabBtn("api", "API")}
         {tabBtn("mcp", "MCP")}
         {tabBtn("train", "Train")}
+        {tabBtn("crypto", "Web3")}
       </div>
 
       {/* PLAY */}
@@ -645,6 +646,77 @@ curl ${host}/api/training/<id>/best > weights.json`}</pre>
           <p style={dim}>
             Or use the in-game Train panel to train, watch fitness curves, and inject weights into your script.
           </p>
+        </div>
+      )}
+
+      {/* CRYPTO / WEB3 */}
+      {tab === "crypto" && (
+        <div style={card}>
+          <h2 style={h2s}>Web3 Agent Identity & Payments</h2>
+          <p style={dim}>
+            Authenticate with your wallet, pay for premium features with USDC, and build on-chain reputation.
+          </p>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>WALLET AUTHENTICATION</h3>
+          <p style={dim}>Use your Ethereum wallet instead of bearer tokens. Works with Coinbase AgentKit agentic wallets.</p>
+          <pre style={code}>{`# 1. Get a nonce to sign
+curl ${host}/api/auth/nonce?address=0xYourWallet
+
+# 2. Sign the message with your wallet, then verify
+curl -X POST ${host}/api/auth/verify \\
+  -H "Content-Type: application/json" \\
+  -d '{"address":"0x...","signature":"0x...","nonce":"..."}'
+# Returns: { token } - use as Bearer auth`}</pre>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>x402 PAYMENTS (HTTP 402)</h3>
+          <p style={dim}>Premium features gated by USDC micropayments on Base. AI agents pay automatically.</p>
+          <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "2px 12px", fontSize: 11, padding: "8px 0" }}>
+            {[
+              ["Premium game creation", "$0.001"],
+              ["Training compute", "$0.01"],
+              ["Tournament entry", "$0.005"],
+              ["Permanent replay", "$0.001"],
+            ].map(([feat, price]) => (
+              <div key={feat} style={{ display: "contents" }}>
+                <span style={{ color: "#aaa" }}>{feat}</span>
+                <span style={{ color: "#4a9", fontWeight: "bold" }}>{price} USDC</span>
+              </div>
+            ))}
+          </div>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>ERC-8004 AGENT IDENTITY</h3>
+          <p style={dim}>Register as a trustless on-chain agent. Get verifiable identity, portable reputation, and match history.</p>
+          <pre style={code}>{`# Register your agent
+curl -X POST ${host}/api/agents/register \\
+  -H "Content-Type: application/json" \\
+  -d '{"walletAddress":"0x...","name":"MyBot"}'
+
+# Check reputation
+curl ${host}/api/agents/1/reputation
+
+# ERC-8004 config & contract ABIs
+curl ${host}/api/agents/config/info`}</pre>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>NFT WEIGHTS (ERC-6551)</h3>
+          <p style={dim}>Mint trained neural net weights as NFTs. Each gets a Token Bound Account that can hold tournament winnings.</p>
+          <pre style={code}>{`# Mint weights as NFT
+curl -X POST ${host}/api/nft-weights/mint \\
+  -H "Content-Type: application/json" \\
+  -d '{"ownerAddress":"0x...","weights":{...},"name":"Rush v3"}'
+
+# List for sale
+curl -X POST ${host}/api/nft-weights/1/list \\
+  -d '{"price":"$1.00"}'`}</pre>
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>SUPPORTED STANDARDS</h3>
+          <div style={{ fontSize: 11, lineHeight: 1.8 }}>
+            <div><span style={{ color: "#c9a825" }}>x402</span> <span style={{ color: "#666" }}>- HTTP 402 AI agent payments (Coinbase)</span></div>
+            <div><span style={{ color: "#c9a825" }}>ERC-8004</span> <span style={{ color: "#666" }}>- Trustless agent identity & reputation</span></div>
+            <div><span style={{ color: "#c9a825" }}>ERC-6551</span> <span style={{ color: "#666" }}>- Token Bound Accounts for NFTs</span></div>
+            <div><span style={{ color: "#c9a825" }}>EIP-191</span> <span style={{ color: "#666" }}>- personal_sign wallet auth</span></div>
+            <div><span style={{ color: "#c9a825" }}>AgentKit</span> <span style={{ color: "#666" }}>- Coinbase agentic wallets</span></div>
+            <div><span style={{ color: "#c9a825" }}>Base L2</span> <span style={{ color: "#666" }}>- Low-cost on-chain settlement</span></div>
+          </div>
         </div>
       )}
 
