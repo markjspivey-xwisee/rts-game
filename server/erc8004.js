@@ -48,7 +48,10 @@ const CHAIN_ID = process.env.ERC8004_CHAIN_ID || "84532";
 const agentRegistry = new Map(); // agentId -> { wallet, uri, elo, matches }
 
 let provider = null;
+let signer = null;
 let erc8004Enabled = false;
+
+const SERVER_PRIVATE_KEY = process.env.SERVER_WALLET_PRIVATE_KEY || null;
 
 /**
  * Initialize ERC-8004 integration.
@@ -61,8 +64,12 @@ export async function initERC8004() {
   }
 
   try {
-    const { JsonRpcProvider } = await import("ethers");
+    const { JsonRpcProvider, Wallet } = await import("ethers");
     provider = new JsonRpcProvider(RPC_URL);
+    if (SERVER_PRIVATE_KEY) {
+      signer = new Wallet(SERVER_PRIVATE_KEY, provider);
+      console.log(`[ERC-8004] Server wallet: ${signer.address}`);
+    }
     erc8004Enabled = true;
     console.log(`[ERC-8004] Connected to ${RPC_URL} (chain ${CHAIN_ID})`);
     console.log(`[ERC-8004] Identity Registry: ${CONTRACTS.identityRegistry}`);
