@@ -2,16 +2,14 @@
 //  GAME STATE INITIALIZATION
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { MW, MH, PLAYER_COLORS, ri } from "./constants.js";
+import { MW, MH, PLAYER_COLORS, ri, DIPLO, AGE_ORDER } from "./constants.js";
 import { genTerrain } from "./terrain.js";
-import { genResources, genHorses } from "./resources.js";
+import { genResources, genHorses, genRelics } from "./resources.js";
 import { mkVillager } from "./units.js";
 import { mkFog } from "./fog.js";
 
 /**
  * TC positions based on player count.
- * @param {number} playerCount
- * @returns {{x:number, y:number}[]}
  */
 export function getTcPositions(playerCount) {
   switch (playerCount) {
@@ -27,9 +25,21 @@ export function getTcPositions(playerCount) {
 }
 
 /**
+ * Initialize diplomacy matrix. Default: all enemies.
+ */
+function initDiplomacy(playerIds) {
+  const d = {};
+  for (const a of playerIds) {
+    d[a] = {};
+    for (const b of playerIds) {
+      d[a][b] = a === b ? DIPLO.ally : DIPLO.enemy;
+    }
+  }
+  return d;
+}
+
+/**
  * Initialize a new game.
- * @param {import('./types.js').GameConfig} config
- * @returns {import('./types.js').GameState}
  */
 export function initGame(config) {
   const {
@@ -38,33 +48,34 @@ export function initGame(config) {
     playerTypes = [],
     players: playerDefs = null,
     enablePvE = false,
+    mapTheme = "default",
   } = config;
 
   const count = Math.max(2, Math.min(4, playerCount));
   const tcPositions = getTcPositions(count);
 
-  /** @type {{ nextUid: number }} */
   const uidState = { nextUid: 1 };
 
-  // Generate terrain with all TC positions
-  const terrain = genTerrain(tcPositions);
+  // Generate terrain with theme
+  const terrain = genTerrain(tcPositions, mapTheme);
 
-  // Generate resources and horses
-  const resources = genResources(terrain, tcPositions, uidState);
+  // Generate resources, horses, and relics
+  const resources = genResources(terrain, tcPositions, uidState, mapTheme);
   const horses = genHorses(terrain, tcPositions, uidState);
+  const relics = genRelics(terrain, tcPositions, uidState);
 
   // Create players
-  /** @type {import('./types.js').Player[]} */
   const players = [];
+  const playerIds = [];
 
   for (let i = 0; i < count; i++) {
-    // Support both { players: [{id, name, type, color}] } and { playerNames, playerTypes } formats
     const def = playerDefs?.[i];
     const id = def?.id || `p${i + 1}`;
     const name = def?.name || playerNames[i] || `Player ${i + 1}`;
     const type = def?.type || playerTypes[i] || (i === 0 ? "human" : "bot");
     const color = def?.color || PLAYER_COLORS[i] || PLAYER_COLORS[0];
     const tcPos = tcPositions[i];
+    playerIds.push(id);
 
     // Create 4 starting villagers
     const units = [];
@@ -83,10 +94,13 @@ export function initGame(config) {
       units,
       buildings: [],
       vehicles: [],
+      navalUnits: [],
       stockpile: { wood: 120, stone: 30, gold: 0, food: 100 },
       fog: mkFog(),
       popCap: 4,
       memory: {},
+      age: "dark",
+      ageProgress: null, // { targetAge, progress, needed } when advancing
       stats: {
         kills: 0,
         deaths: 0,
@@ -95,10 +109,12 @@ export function initGame(config) {
         maxPop: 4,
         wavesEndured: 0,
         specLevels: {},
+        promotions: {},
       },
       eliminated: false,
       spawnPos: { x: tcPos.x, y: tcPos.y },
       buildQueue: [],
+      relicCount: 0,
     });
   }
 
@@ -109,6 +125,7 @@ export function initGame(config) {
     terrain,
     resources,
     horses,
+    relics,
     players,
     enemies: [],
     log: ["☀ Dawn breaks. Destroy all enemy Town Centers to win!"],
@@ -118,5 +135,7 @@ export function initGame(config) {
     paused: false,
     nextUid: uidState.nextUid,
     enablePvE,
+    mapTheme,
+    diplomacy: initDiplomacy(playerIds),
   };
 }

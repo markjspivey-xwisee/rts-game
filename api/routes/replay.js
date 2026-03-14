@@ -1,8 +1,12 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  REPLAY & SPECTATE ROUTES
+//  REPLAY & SPECTATE ROUTES - with shareable replay URLs
 // ═══════════════════════════════════════════════════════════════════════════
 
 import { Router } from "express";
+import { randomBytes } from "crypto";
+
+// Persistent replay store keyed by short share codes
+const sharedReplays = new Map(); // shareCode -> { replay, createdAt }
 
 /**
  * @param {import("../../server/lobby.js").Lobby} lobby
@@ -40,6 +44,28 @@ export function createReplayRouter(lobby) {
     });
   });
 
+  // POST /api/games/:id/replay/share - Generate a shareable replay URL
+  router.post("/:id/replay/share", (req, res) => {
+    const room = lobby.getGame(req.params.id);
+    if (!room) return res.status(404).json({ error: "Game not found" });
+
+    if (room.status !== "finished" && room.replayFrames.length === 0) {
+      return res.status(409).json({ error: "Game has no replay data yet" });
+    }
+
+    const shareCode = randomBytes(6).toString("base64url");
+    sharedReplays.set(shareCode, {
+      replay: room.getReplay(),
+      createdAt: Date.now(),
+    });
+
+    const host = req.get("host") || "localhost:3000";
+    const protocol = req.protocol || "http";
+    const shareUrl = `${protocol}://${host}/?replay=${shareCode}`;
+
+    res.json({ shareCode, shareUrl });
+  });
+
   // GET /api/games/:id/spectate - Get current spectator view (snapshot)
   router.get("/:id/spectate", (req, res) => {
     const room = lobby.getGame(req.params.id);
@@ -54,3 +80,6 @@ export function createReplayRouter(lobby) {
 
   return router;
 }
+
+// Expose shared replays for use by server/index.js
+export { sharedReplays };

@@ -14,6 +14,7 @@ import { Lobby } from "./lobby.js";
 import { createApiRouter } from "../api/index.js";
 import { registerDefaultWeights } from "../api/routes/weights.js";
 import { setupWebSocket } from "./ws-handler.js";
+import { sharedReplays } from "../api/routes/replay.js";
 
 const PORT = process.env.PORT || 3000;
 
@@ -34,6 +35,13 @@ app.use(express.static(clientDist));
 // Health check
 app.get("/health", (_req, res) => {
   res.json({ status: "ok", games: lobby.games.size });
+});
+
+// Shared replay lookup by code
+app.get("/api/replays/:code", (req, res) => {
+  const entry = sharedReplays.get(req.params.code);
+  if (!entry) return res.status(404).json({ error: "Replay not found or expired" });
+  res.json(entry.replay);
 });
 
 // ── Docs / Skills endpoints for AI agents ──────────────────────────────
@@ -58,17 +66,37 @@ app.get("/api/docs", (_req, res) => {
     },
     rest_api: {
       list_games: "GET /api/games",
-      create_game: "POST /api/games { config: { playerCount, enablePvE }, playerName }",
+      create_game: "POST /api/games { config: { playerCount, enablePvE, mapTheme }, playerName }",
       join_game: "POST /api/games/:id/join { playerName }",
       start_game: "POST /api/games/:id/start [Auth: Bearer token]",
       add_bot: "POST /api/games/:id/add-bot [Auth: Bearer token]",
       get_state: "GET /api/games/:id/state [Auth: Bearer token]",
       send_commands: "POST /api/games/:id/commands [Auth: Bearer token]",
-      submit_script: "POST /api/games/:id/script [Auth: Bearer token]",
+      submit_script: "POST /api/games/:id/script [Auth: Bearer token] (hot-reload: submit anytime mid-game)",
       get_replay: "GET /api/games/:id/replay",
+      share_replay: "POST /api/games/:id/replay/share -> { shareCode, shareUrl }",
+      get_shared_replay: "GET /api/replays/:code",
       spectate_snapshot: "GET /api/games/:id/spectate",
       websocket: "WS /?gameId=...&token=...",
       spectate_ws: "WS /?gameId=...&spectate=true",
+    },
+    new_commands: {
+      advance_age: "POST command { action: 'advance_age' } - Advance to next age",
+      formation: "POST command { action: 'formation', unitIds: [...], formation: 'line'|'wedge'|'box' }",
+      set_diplomacy: "POST command { action: 'set_diplomacy', target_player_id: '...', status: 0|1|2 }",
+      tribute: "POST command { action: 'tribute', target_player_id: '...', resource: '...', amount: N }",
+      train_naval: "POST command { action: 'train_naval', naval_type: 'fishing_boat'|'warship'|'transport' }",
+      pickup_relic: "POST command { action: 'pickup_relic', unitIds: [...], target_id: relicId }",
+    },
+    leaderboard_api: {
+      get_leaderboard: "GET /api/leaderboard",
+      get_player: "GET /api/leaderboard/:name",
+    },
+    tournament_api: {
+      create: "POST /api/tournaments { name, participants: [...], config }",
+      list: "GET /api/tournaments",
+      get: "GET /api/tournaments/:id",
+      start: "POST /api/tournaments/:id/start",
     },
     weights_api: {
       list: "GET /api/weights",
@@ -82,6 +110,8 @@ app.get("/api/docs", (_req, res) => {
       best_weights: "GET /api/training/:id/best",
       stop: "POST /api/training/:id/stop",
     },
+    map_themes: ["default", "desert", "island", "forest", "arena"],
+    ages: ["dark", "feudal", "castle", "imperial"],
   });
 });
 
@@ -154,6 +184,16 @@ curl -X POST /api/games/<gameId>/script -H "Authorization: Bearer <token>" \\
 | craft | craft_item | Craft equipment at building |
 | ability | - | Use specialization ability (L3+) |
 | idle | - | Stop current action |
+| mount | target_id | Mount a tamed horse |
+| dismount | - | Dismount from horse |
+| crew | target_id | Crew a siege vehicle |
+| uncrew | - | Leave a siege vehicle |
+| advance_age | - | Research next age (costs resources) |
+| formation | formation | Set formation: line, wedge, or box |
+| set_diplomacy | target_player_id, status | Set relation: 0=enemy, 1=neutral, 2=ally |
+| tribute | target_player_id, resource, amount | Send resources (25% tax) |
+| train_naval | naval_type | Train naval unit at dock |
+| pickup_relic | target_id | Pick up a neutral relic |
 
 ## Neural Net Training API
 \`\`\`bash

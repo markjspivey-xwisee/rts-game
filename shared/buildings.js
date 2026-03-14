@@ -3,14 +3,24 @@
 // ═══════════════════════════════════════════════════════════════════════════
 
 export const BLD = {
-  house:    { cost: { wood: 30 }, pop: 4, size: 2, color: "#7B6545", hp: 100, bt: 25, icon: "🏠" },
-  farm:     { cost: { wood: 20 }, size: 2, color: "#7B7B2A", hp: 60, bt: 20, gen: "food", rate: 0.18, icon: "🌾" },
-  barracks: { cost: { wood: 50, stone: 20 }, size: 2, color: "#5B3216", hp: 150, bt: 35, icon: "⚔", unlocks: ["warrior_training"] },
-  tower:    { cost: { stone: 40, gold: 10 }, size: 1, color: "#4a4a5e", hp: 200, bt: 40, range: 6, dmg: 4, icon: "🗼", requires: "tower" },
-  workshop: { cost: { wood: 40, stone: 30 }, size: 2, color: "#5a4a3a", hp: 120, bt: 30, icon: "🔧", unlocks: ["tower"] },
-  market:   { cost: { wood: 30, gold: 15 }, size: 2, color: "#6a5a2a", hp: 100, bt: 25, icon: "🏪", unlocks: ["trade"] },
-  stable:   { cost: { wood: 40, food: 20 }, size: 2, color: "#6B5A40", hp: 110, bt: 28, icon: "🐴", unlocks: ["horsemanship"] },
-  bridge:   { cost: { wood: 15, stone: 10 }, size: 1, color: "#8B7355", hp: 80, bt: 15, icon: "🌉" },
+  // ── Dark Age ──
+  house:    { cost: { wood: 30 }, pop: 4, size: 2, color: "#7B6545", hp: 100, bt: 25, icon: "🏠", age: "dark" },
+  farm:     { cost: { wood: 20 }, size: 2, color: "#7B7B2A", hp: 60, bt: 20, gen: "food", rate: 0.18, icon: "🌾", age: "dark" },
+  barracks: { cost: { wood: 50, stone: 20 }, size: 2, color: "#5B3216", hp: 150, bt: 35, icon: "⚔", unlocks: ["warrior_training"], age: "dark" },
+  wall:     { cost: { stone: 5 }, size: 1, color: "#5a5a6a", hp: 250, bt: 8, icon: "🧱", age: "dark", blocksPath: true },
+  gate:     { cost: { stone: 10, wood: 5 }, size: 1, color: "#6a6a7a", hp: 200, bt: 12, icon: "🚪", age: "dark", isGate: true },
+  bridge:   { cost: { wood: 15, stone: 10 }, size: 1, color: "#8B7355", hp: 80, bt: 15, icon: "🌉", age: "dark" },
+  // ── Feudal Age ──
+  workshop: { cost: { wood: 40, stone: 30 }, size: 2, color: "#5a4a3a", hp: 120, bt: 30, icon: "🔧", unlocks: ["tower"], age: "feudal" },
+  market:   { cost: { wood: 30, gold: 15 }, size: 2, color: "#6a5a2a", hp: 100, bt: 25, icon: "🏪", unlocks: ["trade"], age: "feudal" },
+  stable:   { cost: { wood: 40, food: 20 }, size: 2, color: "#6B5A40", hp: 110, bt: 28, icon: "🐴", unlocks: ["horsemanship"], age: "feudal" },
+  tower:    { cost: { stone: 40, gold: 10 }, size: 1, color: "#4a4a5e", hp: 200, bt: 40, range: 6, dmg: 4, icon: "🗼", requires: "tower", age: "feudal" },
+  dock:     { cost: { wood: 50 }, size: 2, color: "#4a3a2a", hp: 120, bt: 30, icon: "⚓", unlocks: ["sailing"], age: "feudal", onWater: true },
+  // ── Castle Age ──
+  temple:   { cost: { stone: 60, gold: 40 }, size: 2, color: "#8a7a6a", hp: 180, bt: 45, icon: "⛪", unlocks: ["faith"], age: "castle" },
+  castle_tower: { cost: { stone: 80, gold: 30 }, size: 1, color: "#5a5a7a", hp: 400, bt: 60, range: 8, dmg: 8, icon: "🏰", requires: "tower", age: "castle" },
+  // ── Imperial Age ──
+  wonder:   { cost: { wood: 200, stone: 200, gold: 200 }, size: 3, color: "#c4a035", hp: 600, bt: 200, icon: "🏛", age: "imperial" },
 };
 
 /**

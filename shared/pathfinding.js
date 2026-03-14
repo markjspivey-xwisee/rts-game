@@ -1,17 +1,19 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  A* PATHFINDING (terrain-aware)
+//  A* PATHFINDING (terrain-aware, wall/gate support)
 // ═══════════════════════════════════════════════════════════════════════════
 
-import { MW, MH, TERRAIN_WATER, cl } from "./constants.js";
+import { MW, MH, TERRAIN_WATER, TERRAIN_SAND, cl } from "./constants.js";
 import { BLD } from "./buildings.js";
 
 /**
  * Build a collision grid from the current game state.
- * Marks water and all players' TCs + built buildings as blocked.
+ * Marks water, walls, and all players' buildings as blocked.
+ * Gates are passable to allies, blocked to enemies.
  * @param {import('./types.js').GameState} state
+ * @param {string} [forPlayerId] - player id for gate passability
  * @returns {Uint8Array[]}
  */
-export function buildGrid(state) {
+export function buildGrid(state, forPlayerId) {
   const g = Array.from({ length: MH }, () => new Uint8Array(MW));
 
   // Water blocks
@@ -19,47 +21,52 @@ export function buildGrid(state) {
     for (let x = 0; x < MW; x++)
       if (state.terrain[y][x] === TERRAIN_WATER) g[y][x] = 1;
 
-  // Mark a TC as blocked (3x3)
-  const markTC = (tc) => {
-    if (!tc) return;
-    for (let dy = -1; dy <= 1; dy++)
-      for (let dx = -1; dx <= 1; dx++) {
-        const bx = tc.x + dx, by = tc.y + dy;
-        if (bx >= 0 && bx < MW && by >= 0 && by < MH) g[by][bx] = 1;
-      }
-  };
-
-  // Mark buildings as blocked
-  const markBuildings = (blds) => {
-    for (const b of blds) {
+  // Mark buildings as blocked (walls block, gates are conditional)
+  for (const player of state.players) {
+    if (player.eliminated) continue;
+    for (const b of player.buildings) {
       if (!b.built) continue;
-      const sz = BLD[b.type]?.size || 1;
+      const bd = BLD[b.type];
+      if (!bd) continue;
+
+      // Gates are passable for allies
+      if (bd.isGate) {
+        if (forPlayerId && forPlayerId !== player.id) {
+          // Check diplomacy
+          const diplo = state.diplomacy?.[player.id]?.[forPlayerId];
+          if (diplo !== 2) { // not ally
+            g[b.y][b.x] = 1;
+          }
+        }
+        continue;
+      }
+
+      const sz = bd.size || 1;
       for (let dy = 0; dy < sz; dy++)
         for (let dx = 0; dx < sz; dx++) {
           const bx = b.x + dx, by = b.y + dy;
           if (bx >= 0 && bx < MW && by >= 0 && by < MH) g[by][bx] = 1;
         }
     }
-  };
-
-  // Iterate all players' buildings (TCs are walkable so units can move near them)
-  for (const player of state.players) {
-    if (player.eliminated) continue;
-    markBuildings(player.buildings);
   }
 
   return g;
 }
 
 /**
+ * Build a water-only grid for naval pathfinding.
+ * Only water and bridge tiles are passable.
+ */
+export function buildWaterGrid(state) {
+  const g = Array.from({ length: MH }, () => new Uint8Array(MW));
+  for (let y = 0; y < MH; y++)
+    for (let x = 0; x < MW; x++)
+      if (state.terrain[y][x] !== TERRAIN_WATER) g[y][x] = 1;
+  return g;
+}
+
+/**
  * A* pathfinding. Returns the first step {x,y} toward the target, or null.
- * @param {number} sx - start x
- * @param {number} sy - start y
- * @param {number} ex - end x
- * @param {number} ey - end y
- * @param {Uint8Array[]} grid - collision grid
- * @param {number} [maxS=180] - max steps
- * @returns {{x:number, y:number}|null}
  */
 export function astar(sx, sy, ex, ey, grid, maxS = 180) {
   if (sx === ex && sy === ey) return null;
@@ -89,7 +96,9 @@ export function astar(sx, sy, ex, ey, grid, maxS = 180) {
       const nk = K(nx, ny);
       if (closed.has(nk)) continue;
       if (grid[ny][nx] && !(nx === ex && ny === ey)) continue;
-      const ng = c.g + 1;
+      // Sand terrain costs extra movement
+      const moveCost = 1;
+      const ng = c.g + moveCost;
       if (!gs.has(nk) || ng < gs.get(nk)) {
         gs.set(nk, ng); from.set(nk, { x: c.x, y: c.y });
         open.push({ x: nx, y: ny, g: ng, f: ng + Math.abs(ex - nx) + Math.abs(ey - ny) });

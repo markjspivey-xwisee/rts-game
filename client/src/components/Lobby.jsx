@@ -12,12 +12,14 @@ export default function Lobby({ onJoinGame }) {
   const [name, setName] = useState("");
   const [playerCount, setPlayerCount] = useState(2);
   const [enablePvE, setEnablePvE] = useState(false);
+  const [mapTheme, setMapTheme] = useState("default");
   const [waiting, setWaiting] = useState(null);
   const [lobbyPlayers, setLobbyPlayers] = useState([]);
   const [err, setErr] = useState(null);
   const [tab, setTab] = useState("play");
   const [weightsList, setWeightsList] = useState([]);
   const [uploadForm, setUploadForm] = useState({ name: "", description: "", json: "" });
+  const [leaderboard, setLeaderboard] = useState([]);
 
   useEffect(() => {
     const load = async () => {
@@ -43,6 +45,21 @@ export default function Lobby({ onJoinGame }) {
       } catch {}
     };
     loadWeights();
+  }, [tab]);
+
+  // Load leaderboard when tab switches to leaderboard
+  useEffect(() => {
+    if (tab !== "leaderboard") return;
+    const loadLb = async () => {
+      try {
+        const res = await fetch(`${API}/leaderboard`);
+        const data = await res.json();
+        setLeaderboard(data.leaderboard || []);
+      } catch {}
+    };
+    loadLb();
+    const iv = setInterval(loadLb, 5000);
+    return () => clearInterval(iv);
   }, [tab]);
 
   useEffect(() => {
@@ -72,7 +89,7 @@ export default function Lobby({ onJoinGame }) {
     try {
       const res = await fetch(`${API}/games`, {
         method: "POST", headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ config: { playerCount, enablePvE }, playerName: name.trim() }),
+        body: JSON.stringify({ config: { playerCount, enablePvE, mapTheme }, playerName: name.trim() }),
       });
       const data = await res.json();
       if (data.gameId) {
@@ -259,6 +276,7 @@ curl -X POST ${host}/api/games \\
       <div style={{ display: "flex", gap: 4, marginBottom: 0, maxWidth: "95vw", width: 600, flexWrap: "wrap" }}>
         {tabBtn("play", "Play")}
         {tabBtn("watch", "Watch")}
+        {tabBtn("leaderboard", "ELO")}
         {tabBtn("weights", "Weights")}
         {tabBtn("agents", "Agents")}
         {tabBtn("api", "API")}
@@ -286,6 +304,22 @@ curl -X POST ${host}/api/games \\
                   style={{ ...B, padding: "4px 12px", background: playerCount === n ? "#3a4a2a" : "#2a2e22",
                     color: playerCount === n ? "#c9a825" : "#888" }}>{n}</button>
               ))}
+            </div>
+            <div style={{ marginBottom: 10 }}>
+              <label style={{ color: "#888", fontSize: 12, marginBottom: 4, display: "block" }}>Map Theme:</label>
+              <div style={{ display: "flex", gap: 6, flexWrap: "wrap" }}>
+                {[
+                  ["default", "🌍 Default"],
+                  ["desert", "🏜 Desert"],
+                  ["island", "🏝 Island"],
+                  ["forest", "🌲 Forest"],
+                  ["arena", "⚔ Arena"],
+                ].map(([id, label]) => (
+                  <button key={id} onClick={() => setMapTheme(id)}
+                    style={{ ...B, padding: "4px 10px", background: mapTheme === id ? "#3a4a2a" : "#2a2e22",
+                      color: mapTheme === id ? "#c9a825" : "#888", fontSize: 11 }}>{label}</button>
+                ))}
+              </div>
             </div>
             <label style={{ display: "flex", alignItems: "center", gap: 8, color: "#888", fontSize: 12, marginBottom: 12 }}>
               <input type="checkbox" checked={enablePvE} onChange={e => setEnablePvE(e.target.checked)} /> Enable PvE raids
@@ -385,6 +419,8 @@ api.pathDist(a,b) // Manhattan distance`}</pre>
               ["WS",   "/?gameId=...&spectate=true", "Spectate (no auth)"],
               [null],
               ["GET",  "/api/games/:id/replay", "Download replay"],
+              ["POST", "/api/games/:id/replay/share", "Share replay URL"],
+              ["GET",  "/api/replays/:code", "Fetch shared replay"],
               ["GET",  "/api/games/:id/spectate", "Spectator snapshot"],
               [null],
               ["GET",  "/api/weights", "List shared weights"],
@@ -395,6 +431,11 @@ api.pathDist(a,b) // Manhattan distance`}</pre>
               ["POST", "/api/training/:id/run", "Begin evolution"],
               ["GET",  "/api/training/:id/status", "Poll progress"],
               ["GET",  "/api/training/:id/best", "Get best weights"],
+              [null],
+              ["GET",  "/api/leaderboard", "ELO rankings"],
+              ["POST", "/api/tournaments", "Create tournament"],
+              ["GET",  "/api/tournaments/:id", "Tournament details"],
+              ["POST", "/api/tournaments/:id/start", "Start tournament"],
               [null],
               ["GET",  "/api/docs", "API index (JSON)"],
               ["GET",  "/api/docs/skill", "Gameplay guide"],
@@ -604,6 +645,57 @@ curl ${host}/api/training/<id>/best > weights.json`}</pre>
           <p style={dim}>
             Or use the in-game Train panel to train, watch fitness curves, and inject weights into your script.
           </p>
+        </div>
+      )}
+
+      {/* LEADERBOARD */}
+      {tab === "leaderboard" && (
+        <div style={card}>
+          <h2 style={h2s}>ELO Leaderboard</h2>
+          <p style={dim}>Player ratings updated after each game. Win to climb the ranks.</p>
+
+          {leaderboard.length === 0 && (
+            <p style={{ color: "#555", fontSize: 12 }}>No games played yet. Play a game to appear on the leaderboard!</p>
+          )}
+          {leaderboard.length > 0 && (
+            <div style={{ marginTop: 12 }}>
+              <div style={{ display: "flex", gap: 8, padding: "4px 8px", fontSize: 10, color: "#666", borderBottom: "1px solid #2a3020" }}>
+                <span style={{ width: 30 }}>#</span>
+                <span style={{ flex: 1 }}>Player</span>
+                <span style={{ width: 50, textAlign: "right" }}>ELO</span>
+                <span style={{ width: 40, textAlign: "right" }}>W</span>
+                <span style={{ width: 40, textAlign: "right" }}>L</span>
+                <span style={{ width: 50, textAlign: "right" }}>Games</span>
+              </div>
+              {leaderboard.map((p, i) => (
+                <div key={p.name} style={{
+                  display: "flex", gap: 8, padding: "6px 8px", fontSize: 11,
+                  background: i % 2 === 0 ? "rgba(255,255,255,0.02)" : "transparent",
+                  color: i === 0 ? "#c9a825" : i < 3 ? "#aaa" : "#888",
+                }}>
+                  <span style={{ width: 30, color: i < 3 ? "#c9a825" : "#555" }}>{i + 1}</span>
+                  <span style={{ flex: 1, fontWeight: i < 3 ? "bold" : "normal" }}>{p.name}</span>
+                  <span style={{ width: 50, textAlign: "right", color: "#4a9" }}>{p.elo}</span>
+                  <span style={{ width: 40, textAlign: "right", color: "#4a8" }}>{p.wins}</span>
+                  <span style={{ width: 40, textAlign: "right", color: "#c44" }}>{p.losses}</span>
+                  <span style={{ width: 50, textAlign: "right" }}>{p.games}</span>
+                </div>
+              ))}
+            </div>
+          )}
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>TOURNAMENTS</h3>
+          <p style={dim}>Create bracket tournaments via the API. Bot participants compete automatically.</p>
+          <pre style={code}>{`# Create a tournament
+curl -X POST ${host}/api/tournaments \\
+  -H "Content-Type: application/json" \\
+  -d '{"name":"Bot Championship","participants":["Bot1","Bot2","Bot3","Bot4"]}'
+
+# Start the tournament
+curl -X POST ${host}/api/tournaments/<id>/start
+
+# Check results
+curl ${host}/api/tournaments/<id>`}</pre>
         </div>
       )}
 

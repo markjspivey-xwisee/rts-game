@@ -13,14 +13,34 @@ const SP = {
   builder:    { c: "#6a5a3a", l: "Builder",     i: "🔨" },
 };
 const BLD = {
-  house:    { icon: "🏠", size: 2, hp: 100, pop: 4, cost: { wood: 30 } },
-  farm:     { icon: "🌾", size: 2, hp: 60, gen: "food", rate: 0.18, cost: { wood: 20 } },
-  barracks: { icon: "⚔",  size: 2, hp: 150, unlocks: "warrior_training", cost: { wood: 50, stone: 20 } },
-  tower:    { icon: "🗼", size: 1, hp: 200, range: 6, dmg: 4, cost: { stone: 40, gold: 10 } },
-  workshop: { icon: "🔧", size: 2, hp: 120, unlocks: "tower", cost: { wood: 40, stone: 30 } },
-  market:   { icon: "🏪", size: 2, hp: 100, unlocks: "trade", cost: { wood: 30, gold: 15 } },
-  stable:   { icon: "🐴", size: 2, hp: 110, unlocks: "horsemanship", cost: { wood: 40, food: 20 } },
-  bridge:   { icon: "🌉", size: 1, hp: 80, cost: { wood: 15, stone: 10 } },
+  house:    { icon: "🏠", size: 2, hp: 100, pop: 4, cost: { wood: 30 }, age: "dark" },
+  farm:     { icon: "🌾", size: 2, hp: 60, gen: "food", rate: 0.18, cost: { wood: 20 }, age: "dark" },
+  barracks: { icon: "⚔",  size: 2, hp: 150, unlocks: "warrior_training", cost: { wood: 50, stone: 20 }, age: "dark" },
+  tower:    { icon: "🗼", size: 1, hp: 200, range: 6, dmg: 4, cost: { stone: 40, gold: 10 }, age: "dark" },
+  workshop: { icon: "🔧", size: 2, hp: 120, unlocks: "tower", cost: { wood: 40, stone: 30 }, age: "dark" },
+  market:   { icon: "🏪", size: 2, hp: 100, unlocks: "trade", cost: { wood: 30, gold: 15 }, age: "dark" },
+  stable:   { icon: "🐴", size: 2, hp: 110, unlocks: "horsemanship", cost: { wood: 40, food: 20 }, age: "feudal" },
+  bridge:   { icon: "🌉", size: 1, hp: 80, cost: { wood: 15, stone: 10 }, age: "dark" },
+  wall:     { icon: "🧱", size: 1, hp: 250, cost: { stone: 5 }, age: "dark" },
+  gate:     { icon: "🚪", size: 1, hp: 200, cost: { stone: 10, wood: 5 }, age: "dark" },
+  dock:     { icon: "⚓", size: 2, hp: 120, unlocks: "sailing", cost: { wood: 50 }, age: "feudal" },
+  temple:   { icon: "⛪", size: 2, hp: 180, unlocks: "faith", cost: { stone: 60, gold: 40 }, age: "castle" },
+  castle_tower: { icon: "🏰", size: 1, hp: 400, range: 8, dmg: 8, cost: { stone: 80, gold: 30 }, age: "castle" },
+  wonder:   { icon: "🏛", size: 3, hp: 600, cost: { wood: 200, stone: 200, gold: 200 }, age: "imperial" },
+};
+
+const AGE_ICONS = { dark: "🌑", feudal: "🏰", castle: "👑", imperial: "⭐" };
+const AGE_NAMES = { dark: "Dark Age", feudal: "Feudal Age", castle: "Castle Age", imperial: "Imperial Age" };
+const AGE_ORDER = ["dark", "feudal", "castle", "imperial"];
+const AGE_COSTS = {
+  feudal:   { food: 100, gold: 50 },
+  castle:   { food: 200, gold: 100, stone: 50 },
+  imperial: { food: 400, gold: 200, stone: 100 },
+};
+const FORMATION_INFO = {
+  line: { icon: "═", desc: "+10% dmg, +0.5 armor" },
+  wedge: { icon: "▲", desc: "+25% dmg, +15% speed" },
+  box: { icon: "□", desc: "-10% dmg, +1.5 armor" },
 };
 
 const ABILITIES = {
@@ -492,14 +512,22 @@ export default function Game({ gameId, playerId, token, onLeave }) {
   const delta = ui.stkDelta || {};
   const dCol = (v) => (v || 0) > 0 ? "#4a8" : (v || 0) < -0.5 ? "#a44" : "#666";
 
+  const myAge = ui.myAge || "dark";
+  const myAgeProgress = ui.myAgeProgress;
+
   // Resource bar
   const resBar = (
-    <div style={{ display: "flex", gap: mob ? 8 : 10, fontSize: mob ? 12 : 11, flexWrap: "wrap" }}>
+    <div style={{ display: "flex", gap: mob ? 8 : 10, fontSize: mob ? 12 : 11, flexWrap: "wrap", alignItems: "center" }}>
+      <span title={AGE_NAMES[myAge]}>{AGE_ICONS[myAge]} <b style={{ color: "#c9a825" }}>{AGE_NAMES[myAge]?.split(" ")[0]}</b>
+        {myAgeProgress && <span style={{ color: "#888", fontSize: 9 }}> ({myAgeProgress.remaining}t)</span>}
+      </span>
+      <span style={{ color: "#333" }}>|</span>
       <span>👥 <b style={{ color: "#c9a825" }}>{myUnits.length}/{ui.myPopCap || 4}</b></span>
       <span>🪵 <b style={{ color: "#4a8" }}>{fmtR(stk.wood)}</b> <span style={{ color: dCol(delta.wood), fontSize: 9 }}>{fmtD(delta.wood || 0)}</span></span>
       <span>🪨 <b style={{ color: "#88a" }}>{fmtR(stk.stone)}</b> <span style={{ color: dCol(delta.stone), fontSize: 9 }}>{fmtD(delta.stone || 0)}</span></span>
       <span>🪙 <b style={{ color: "#ca5" }}>{fmtR(stk.gold)}</b> <span style={{ color: dCol(delta.gold), fontSize: 9 }}>{fmtD(delta.gold || 0)}</span></span>
       <span>🍖 <b style={{ color: stk.food < 10 ? "#f44" : "#a68" }}>{fmtR(stk.food)}</b> <span style={{ color: dCol(delta.food), fontSize: 9 }}>{fmtD(delta.food || 0)}</span></span>
+      {(ui.myRelicCount || 0) > 0 && <span>✝ <b style={{ color: "#ffd700" }}>{ui.myRelicCount}</b></span>}
     </div>
   );
 
@@ -584,8 +612,18 @@ export default function Game({ gameId, playerId, token, onLeave }) {
         <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 6 }}>
           <span style={{ color: sp.c, fontSize: 18 }}>{sp.i}</span>
           <div>
-            <div style={{ color: "#c9a825", fontWeight: "bold", fontSize: 11 }}>#{v.id} {sp.l} L{v.specLv}</div>
-            <div style={{ color: "#666", fontSize: 9 }}>Cmd: {v.cmd || "idle"} | Tag: {v.tag || "none"}</div>
+            <div style={{ color: "#c9a825", fontWeight: "bold", fontSize: 11 }}>
+              #{v.id} {sp.l} L{v.specLv}
+              {v.promotion && v.promotion !== "recruit" && (
+                <span style={{ color: "#ffd700", fontSize: 9, marginLeft: 4 }}>
+                  {v.promotion === "veteran" ? "⭐" : v.promotion === "elite" ? "🌟" : "💎"}{v.promotion}
+                </span>
+              )}
+            </div>
+            <div style={{ color: "#666", fontSize: 9 }}>
+              Cmd: {v.cmd || "idle"} | Tag: {v.tag || "none"}
+              {v.formation && <span> | Fmt: {FORMATION_INFO[v.formation]?.icon || v.formation}</span>}
+            </div>
           </div>
         </div>
 
@@ -748,48 +786,106 @@ export default function Game({ gameId, playerId, token, onLeave }) {
   const specCounts = {};
   for (const v of myUnits) { const s = v.spec || "none"; specCounts[s] = (specCounts[s] || 0) + 1; }
   const totalGathered = stats.gathered || { wood: 0, stone: 0, gold: 0, food: 0 };
-  const techMap = { warrior_training: "Barracks", tower: "Workshop", trade: "Market" };
+
+  const myAgeIdx = AGE_ORDER.indexOf(myAge);
+  const nextAge = myAgeIdx < AGE_ORDER.length - 1 ? AGE_ORDER[myAgeIdx + 1] : null;
+  const nextAgeCost = nextAge ? AGE_COSTS[nextAge] : null;
+  const canAdvanceAge = nextAgeCost && Object.entries(nextAgeCost).every(([r, a]) => (stk[r] || 0) >= a);
+  const diplomacy = ui.diplomacy || {};
 
   const civContent = (
     <div style={{ color: "#c8c0a8", fontSize: mob ? 12 : 10 }}>
       <div style={{ color: "#c9a825", fontWeight: "bold", marginBottom: 8, fontSize: 13 }}>🏛 CIVILIZATION</div>
 
-      {/* Overview */}
+      {/* Age + Overview */}
       <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
-        <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>OVERVIEW</div>
+        <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>AGE & OVERVIEW</div>
+        <div style={{ marginBottom: 4 }}>
+          {AGE_ICONS[myAge]} <b style={{ color: "#c9a825" }}>{AGE_NAMES[myAge]}</b>
+          {myAgeProgress && <span style={{ color: "#888", fontSize: 9 }}> (advancing... {myAgeProgress.remaining}t left)</span>}
+        </div>
+        {nextAge && !myAgeProgress && (
+          <div style={{ marginBottom: 4 }}>
+            <div style={{ color: "#888", fontSize: 9, marginBottom: 2 }}>
+              Next: {AGE_NAMES[nextAge]} - {Object.entries(nextAgeCost).map(([r, a]) => `${r}:${a}`).join(" ")}
+            </div>
+            <div style={{ color: canAdvanceAge ? "#4a8" : "#555", fontSize: 9 }}>
+              {canAdvanceAge ? "Ready to advance (use script: advance_age command)" : "Not enough resources"}
+            </div>
+          </div>
+        )}
         <div>👥 Pop: <b style={{ color: "#c9a825" }}>{myUnits.length}/{ui.myPopCap || 4}</b> 🏠 Buildings: <b>{myBld.length}</b></div>
         <div>⚔ Kills: <b>{stats.kills || 0}</b> 💀 Deaths: <b>{stats.deaths || 0}</b></div>
         <div>📦 Gathered: <b>{Math.floor((totalGathered.wood || 0) + (totalGathered.stone || 0) + (totalGathered.gold || 0) + (totalGathered.food || 0))}</b> T: <b>{ui.tick || 0}</b></div>
+        {(ui.myRelicCount || 0) > 0 && <div>✝ Relics housed: <b style={{ color: "#ffd700" }}>{ui.myRelicCount}</b>/{(ui.visibleRelics || []).length + (ui.myRelicCount || 0)}</div>}
       </div>
 
-      {/* Players */}
+      {/* Players + Diplomacy */}
       <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
-        <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>PLAYERS</div>
-        {players.map(p => (
-          <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2,
-            color: p.eliminated ? "#555" : (p.id === playerId ? "#c9a825" : "#aaa"),
-          }}>
-            <span style={{ color: p.color, fontSize: 12 }}>●</span>
-            <span>{p.name}{p.id === playerId ? " (you)" : ""}</span>
-            {p.eliminated && <span style={{ color: "#c44", fontSize: 9 }}>ELIMINATED</span>}
-          </div>
-        ))}
+        <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>PLAYERS & DIPLOMACY</div>
+        {players.map(p => {
+          const diploStatus = diplomacy[p.id];
+          const diploLabel = diploStatus === 2 ? "ALLY" : diploStatus === 1 ? "NEUTRAL" : null;
+          const diploColor = diploStatus === 2 ? "#4a8" : diploStatus === 1 ? "#ca5" : null;
+          return (
+            <div key={p.id} style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 2,
+              color: p.eliminated ? "#555" : (p.id === playerId ? "#c9a825" : "#aaa"),
+            }}>
+              <span style={{ color: p.color, fontSize: 12 }}>●</span>
+              <span>{p.name}{p.id === playerId ? " (you)" : ""}</span>
+              {p.age && p.id !== playerId && <span style={{ fontSize: 8, color: "#666" }}>{AGE_ICONS[p.age]}</span>}
+              {p.relicCount > 0 && <span style={{ fontSize: 8, color: "#ffd700" }}>✝{p.relicCount}</span>}
+              {diploLabel && <span style={{ color: diploColor, fontSize: 8, fontWeight: "bold" }}>{diploLabel}</span>}
+              {p.eliminated && <span style={{ color: "#c44", fontSize: 9 }}>ELIMINATED</span>}
+            </div>
+          );
+        })}
+        <div style={{ color: "#555", fontSize: 8, marginTop: 4 }}>
+          Diplomacy via script: set_diplomacy, tribute commands
+        </div>
       </div>
 
       {/* Tech Tree */}
       <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
         <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>TECH TREE</div>
-        {["warrior_training", "tower", "trade"].map(t => {
+        {["warrior_training", "tower", "trade", "horsemanship", "sailing", "faith"].map(t => {
           const unlocked = (ui.myTech || []).includes(t);
+          const techSrc = { warrior_training: "Barracks", tower: "Workshop", trade: "Market", horsemanship: "Stable", sailing: "Dock", faith: "Temple" };
           return (
             <div key={t} style={{ color: unlocked ? "#c9a825" : "#555", marginBottom: 2, display: "flex", gap: 6 }}>
               <span>{unlocked ? "✅" : "🔒"}</span>
               <span>{t.replace(/_/g, " ")}</span>
-              <span style={{ color: "#666", fontSize: 9 }}>({techMap[t]})</span>
+              <span style={{ color: "#666", fontSize: 9 }}>({techSrc[t]})</span>
             </div>
           );
         })}
       </div>
+
+      {/* Formations */}
+      <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
+        <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>FORMATIONS <span style={{ color: "#555" }}>(via script: formation command)</span></div>
+        {Object.entries(FORMATION_INFO).map(([key, f]) => (
+          <div key={key} style={{ display: "flex", gap: 6, marginBottom: 2, color: "#aaa" }}>
+            <span style={{ color: "#c9a825", width: 14 }}>{f.icon}</span>
+            <span style={{ width: 40 }}>{key}</span>
+            <span style={{ color: "#666", fontSize: 9 }}>{f.desc}</span>
+          </div>
+        ))}
+      </div>
+
+      {/* Naval */}
+      {(ui.myNavalUnits || []).length > 0 && (
+        <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
+          <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>NAVAL UNITS</div>
+          {(ui.myNavalUnits || []).map(n => (
+            <div key={n.id} style={{ display: "flex", gap: 6, marginBottom: 2, color: "#aaa" }}>
+              <span>{n.type === "fishing_boat" ? "🎣" : n.type === "warship" ? "🚢" : "⛵"}</span>
+              <span>{n.type.replace(/_/g, " ")}</span>
+              <span style={{ color: "#888", fontSize: 9 }}>HP: {Math.floor(n.hp)}/{n.maxHp}</span>
+            </div>
+          ))}
+        </div>
+      )}
 
       {/* Specializations */}
       <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>

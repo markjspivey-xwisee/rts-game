@@ -8,6 +8,8 @@ import { createCommandsRouter } from "./routes/commands.js";
 import { createStateRouter } from "./routes/state.js";
 import { createReplayRouter } from "./routes/replay.js";
 import { createWeightsRouter } from "./routes/weights.js";
+import { createLeaderboardRouter } from "./routes/leaderboard.js";
+import { createTournamentRouter } from "./routes/tournament.js";
 import trainingRouter from "./routes/training.js";
 
 /**
@@ -23,6 +25,8 @@ export function createApiRouter(lobby) {
   router.use("/api/games", createStateRouter(lobby));
   router.use("/api/games", createReplayRouter(lobby));
   router.use("/api/weights", createWeightsRouter());
+  router.use("/api/leaderboard", createLeaderboardRouter(lobby));
+  router.use("/api/tournaments", createTournamentRouter(lobby));
   router.use("/api/training", trainingRouter);
 
   return router;

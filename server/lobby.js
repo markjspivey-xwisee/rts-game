@@ -20,9 +20,12 @@ export class Lobby {
    */
   createGame(config, hostName, hostType = "human") {
     const playerCount = Math.max(2, Math.min(4, config.playerCount || 2));
+    const validThemes = ["default", "desert", "island", "forest", "arena"];
+    const mapTheme = validThemes.includes(config.mapTheme) ? config.mapTheme : "default";
     const normalizedConfig = {
       playerCount,
       enablePvE: !!config.enablePvE,
+      mapTheme,
     };
 
     const gameId = uuidv4();

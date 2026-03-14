@@ -4,22 +4,64 @@
 
 import { BLD, getTech } from "./buildings.js";
 import { ITEMS } from "./items.js";
+import { AGE_ORDER, AGE_COSTS, FORMATIONS, DIPLO } from "./constants.js";
+import { NAVAL } from "./units.js";
 
-const VALID_CMDS = new Set(["gather", "build", "attack", "moveTo", "ability", "idle", "craft", "mount", "dismount", "crew", "uncrew"]);
+const VALID_CMDS = new Set([
+  "gather", "build", "attack", "moveTo", "ability", "idle", "craft",
+  "mount", "dismount", "crew", "uncrew",
+  "advance_age", "formation", "pickup_relic", "tribute",
+  "train_naval", "board_transport", "disembark",
+  "set_diplomacy",
+]);
 const VALID_BUILD_TYPES = new Set(Object.keys(BLD));
 
 /**
  * Validate a single command for a player.
- * @param {import('./types.js').Command} command
- * @param {import('./types.js').Player} player
- * @param {import('./types.js').GameState} state
- * @returns {boolean}
  */
 export function validateCommand(command, player, state) {
   if (!command || !command.cmd) return false;
   if (!VALID_CMDS.has(command.cmd)) return false;
 
-  // Must reference a valid alive unit owned by this player
+  // Commands that don't require a unit
+  if (command.cmd === "advance_age") {
+    if (player.ageProgress) return false; // already advancing
+    const idx = AGE_ORDER.indexOf(player.age);
+    if (idx >= AGE_ORDER.length - 1) return false; // already imperial
+    const nextAge = AGE_ORDER[idx + 1];
+    const cost = AGE_COSTS[nextAge];
+    for (const [r, a] of Object.entries(cost)) {
+      if ((player.stockpile[r] || 0) < a) return false;
+    }
+    return true;
+  }
+
+  if (command.cmd === "set_diplomacy") {
+    return command.targetPlayerId != null && command.status != null;
+  }
+
+  if (command.cmd === "tribute") {
+    const { targetPlayerId, resource, amount } = command;
+    if (!targetPlayerId || !resource || !amount || amount <= 0) return false;
+    if ((player.stockpile[resource] || 0) < amount) return false;
+    return true;
+  }
+
+  if (command.cmd === "formation") {
+    return command.formation != null && FORMATIONS[command.formation] != null;
+  }
+
+  if (command.cmd === "train_naval") {
+    if (!command.navalType || !NAVAL[command.navalType]) return false;
+    const def = NAVAL[command.navalType];
+    if (!player.buildings.some(b => b.type === "dock" && b.built)) return false;
+    for (const [r, a] of Object.entries(def.cost)) {
+      if ((player.stockpile[r] || 0) < a) return false;
+    }
+    return true;
+  }
+
+  // Unit-based commands
   const unit = player.units.find(u => u.id === command.unitId && u.alive);
   if (!unit) return false;
 
@@ -35,6 +77,12 @@ export function validateCommand(command, player, state) {
     if (bd.requires) {
       const tech = getTech(player.buildings);
       if (!tech.has(bd.requires)) return false;
+    }
+    // Check age requirement
+    if (bd.age) {
+      const playerAgeIdx = AGE_ORDER.indexOf(player.age);
+      const bldAgeIdx = AGE_ORDER.indexOf(bd.age);
+      if (bldAgeIdx > playerAgeIdx) return false;
     }
   }
 
@@ -63,7 +111,7 @@ export function validateCommand(command, player, state) {
 
   if (command.cmd === "mount") {
     if (command.targetId == null) return false;
-    if (unit.mounted || unit.crewing) return false; // already on something
+    if (unit.mounted || unit.crewing) return false;
   }
 
   if (command.cmd === "dismount") {
@@ -74,11 +122,15 @@ export function validateCommand(command, player, state) {
     if (command.targetId == null) return false;
     if (unit.mounted || unit.crewing) return false;
     const veh = (player.vehicles || []).find(v => v.id === command.targetId && v.alive);
-    if (!veh || veh.crewId) return false; // vehicle doesn't exist or already crewed
+    if (!veh || veh.crewId) return false;
   }
 
   if (command.cmd === "uncrew") {
     if (!unit.crewing) return false;
+  }
+
+  if (command.cmd === "pickup_relic") {
+    if (command.targetId == null) return false;
   }
 
   return true;
@@ -86,12 +138,27 @@ export function validateCommand(command, player, state) {
 
 /**
  * Apply an array of commands to a player's units.
- * Sets unit cmd/targetId/buildType/etc. based on commands.
- * @param {import('./types.js').Command[]} commands
- * @param {import('./types.js').Player} player
  */
 export function applyCommands(commands, player) {
   for (const cmd of commands) {
+    // Non-unit commands
+    if (cmd.cmd === "advance_age" || cmd.cmd === "set_diplomacy" || cmd.cmd === "tribute" || cmd.cmd === "train_naval") {
+      // Handled directly in tick.js when the command is processed
+      player._pendingCmds = player._pendingCmds || [];
+      player._pendingCmds.push(cmd);
+      continue;
+    }
+
+    if (cmd.cmd === "formation") {
+      // Apply formation to all specified units
+      const ids = cmd.unitIds || (cmd.unitId != null ? [cmd.unitId] : []);
+      for (const uid of ids) {
+        const u = player.units.find(u => u.id === uid && u.alive);
+        if (u) u.formation = cmd.formation;
+      }
+      continue;
+    }
+
     const unit = player.units.find(u => u.id === cmd.unitId && u.alive);
     if (!unit) continue;
 

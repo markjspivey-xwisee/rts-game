@@ -1,5 +1,5 @@
 // ═══════════════════════════════════════════════════════════════════════════
-//  CANVAS RENDERER (multi-player aware)
+//  CANVAS RENDERER (multi-player, ages, naval, relics, formations)
 // ═══════════════════════════════════════════════════════════════════════════
 
 const T = 14;
@@ -16,6 +16,10 @@ const VEH_ICONS = {
   battering_ram: "🪵", catapult: "💣", cart: "🛒",
 };
 
+const NAVAL_ICONS = {
+  fishing_boat: "🎣", transport: "⛵", warship: "🚢",
+};
+
 const SP = {
   none:       { c: "#b8a080", i: "♟" },
   lumberjack: { c: "#4a8c3f", i: "🪓" },
@@ -27,27 +31,28 @@ const SP = {
 
 const BLD_COLORS = {
   house: "#7B6545", farm: "#7B7B2A", barracks: "#5B3216",
-  tower: "#4a4a5e", workshop: "#5a4a3a", market: "#6a5a2a", stable: "#6B5A40", bridge: "#8B7355",
+  tower: "#4a4a5e", workshop: "#5a4a3a", market: "#6a5a2a",
+  stable: "#6B5A40", bridge: "#8B7355",
+  wall: "#5a5a6a", gate: "#6a6a7a", dock: "#4a3a2a",
+  temple: "#8a7a6a", castle_tower: "#5a5a7a", wonder: "#c4a035",
 };
 
 export const BLD_SIZE = {
-  house: 2, farm: 2, barracks: 2, tower: 1, workshop: 2, market: 2, stable: 2, bridge: 1,
+  house: 2, farm: 2, barracks: 2, tower: 1, workshop: 2, market: 2,
+  stable: 2, bridge: 1, wall: 1, gate: 1, dock: 2,
+  temple: 2, castle_tower: 1, wonder: 3,
 };
 
 const ET_COLORS = {
   scout: "#c87040", brute: "#8a3030", archer: "#a06050", raider: "#a04040",
 };
 
+const PROMO_ICONS = {
+  recruit: "", veteran: "⭐", elite: "🌟", champion: "💎",
+};
+
 /**
  * Main game renderer.
- * @param {CanvasRenderingContext2D} ctx
- * @param {object} view - PlayerView from server
- * @param {{x:number,y:number}} cam - camera position
- * @param {number} w - canvas width
- * @param {number} h - canvas height
- * @param {object} sel - { unitId, bld }
- * @param {string} myId - my player id
- * @param {number} [zoom=1] - zoom level
  */
 export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
   if (!view || !view.terrain) return;
@@ -76,14 +81,15 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
       const tt = terrain[y]?.[x] ?? 0;
       const px = sx(x), py = sy(y);
 
-      if (tt === 1) ctx.fillStyle = fv === FOG_VIS ? "#1a3a4a" : "#0e1820";
-      else if (tt === 2) ctx.fillStyle = fv === FOG_VIS ? "#2e3a22" : "#1a2216";
-      else if (tt === 3) ctx.fillStyle = fv === FOG_VIS ? "#5a4a30" : "#3a3020";
-      else ctx.fillStyle = fv === FOG_VIS ? "#1a2816" : "#10160e";
+      if (tt === 1) ctx.fillStyle = fv === FOG_VIS ? "#1a3a4a" : "#0e1820"; // water
+      else if (tt === 2) ctx.fillStyle = fv === FOG_VIS ? "#2e3a22" : "#1a2216"; // hill
+      else if (tt === 3) ctx.fillStyle = fv === FOG_VIS ? "#5a4a30" : "#3a3020"; // bridge
+      else if (tt === 4) ctx.fillStyle = fv === FOG_VIS ? "#c4a868" : "#8a7a50"; // sand
+      else if (tt === 5) ctx.fillStyle = fv === FOG_VIS ? "#0a2a3a" : "#061820"; // deep water
+      else ctx.fillStyle = fv === FOG_VIS ? "#1a2816" : "#10160e"; // grass
 
       ctx.fillRect(px, py, Z, Z);
 
-      // Grid lines
       if (fv === FOG_VIS) {
         ctx.strokeStyle = "rgba(255,255,255,0.03)";
         ctx.strokeRect(px, py, Z, Z);
@@ -111,9 +117,31 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.globalAlpha = 1;
   }
 
-  // Horses (wild and tamed)
+  // Relics
+  for (const r of (view.visibleRelics || [])) {
+    if (r.housed) continue;
+    const fv = fog[r.y]?.[r.x] ?? FOG_UNK;
+    if (fv === FOG_UNK) continue;
+    const px = sx(r.x), py = sy(r.y);
+    if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
+
+    ctx.save();
+    ctx.globalAlpha = fv === FOG_VIS ? 1 : 0.5;
+    // Glowing golden cross
+    const pulse = 0.7 + 0.3 * Math.sin(Date.now() * 0.004);
+    ctx.fillStyle = `rgba(255, 215, 0, ${pulse})`;
+    ctx.fillRect(px + Z * 0.35, py + 2, Z * 0.3, Z - 4);
+    ctx.fillRect(px + 2, py + Z * 0.3, Z - 4, Z * 0.3);
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.max(7, 8 * zoom)}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText("✝", px + Z / 2, py - 1);
+    ctx.restore();
+  }
+
+  // Horses
   for (const hr of (view.visibleHorses || [])) {
-    if (!hr.alive || hr.riderId) continue; // don't draw mounted horses separately
+    if (!hr.alive || hr.riderId) continue;
     const fv = fog[hr.y]?.[hr.x] ?? FOG_UNK;
     if (fv === FOG_UNK) continue;
     const px = sx(hr.x), py = sy(hr.y);
@@ -121,7 +149,6 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
 
     ctx.save();
     ctx.globalAlpha = fv === FOG_VIS ? 1 : 0.5;
-    // Horse body (brown diamond)
     ctx.fillStyle = hr.tamed ? "#8a6a3a" : "#7a5a2a";
     ctx.beginPath();
     ctx.moveTo(px + Z / 2, py + 1);
@@ -133,7 +160,6 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.strokeStyle = hr.tamed ? "#c9a825" : "#5a4a2a";
     ctx.lineWidth = 0.8;
     ctx.stroke();
-    // Label
     if (fv === FOG_VIS) {
       ctx.fillStyle = "#fff";
       ctx.font = `${Math.max(6, 7 * zoom)}px monospace`;
@@ -143,11 +169,9 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.restore();
   }
 
-  // Player info map for colors
+  // Player info map
   const playerMap = {};
-  for (const p of (view.players || [])) {
-    playerMap[p.id] = p;
-  }
+  for (const p of (view.players || [])) playerMap[p.id] = p;
 
   // Buildings helper
   const drawBuilding = (b, color, isOwn) => {
@@ -165,7 +189,7 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.lineWidth = 0.5;
     ctx.strokeRect(px, py, sz * Z, sz * Z);
 
-    // HP bar (only show when damaged)
+    // HP bar
     const maxHp = b.maxHp || 100;
     if (b.hp != null && b.hp < maxHp) {
       const barW = sz * Z;
@@ -176,20 +200,27 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
       ctx.fillRect(px, py - 4, barW * ratio, 2);
     }
 
-    // Tower range indicator
-    if (b.type === "tower" && isOwn && fv === FOG_VIS) {
+    // Tower/castle_tower range
+    if ((b.type === "tower" || b.type === "castle_tower") && isOwn && fv === FOG_VIS) {
+      const range = b.type === "castle_tower" ? 8 : 6;
       ctx.strokeStyle = "rgba(100,160,255,0.15)";
       ctx.lineWidth = 0.5;
       ctx.beginPath();
-      ctx.arc(px + Z / 2, py + Z / 2, 6 * Z, 0, Math.PI * 2);
+      ctx.arc(px + Z / 2, py + Z / 2, range * Z, 0, Math.PI * 2);
       ctx.stroke();
+    }
+
+    // Wonder glow
+    if (b.type === "wonder" && fv === FOG_VIS) {
+      const glow = 0.2 + 0.1 * Math.sin(Date.now() * 0.003);
+      ctx.fillStyle = `rgba(255, 215, 0, ${glow})`;
+      ctx.fillRect(px - 2, py - 2, sz * Z + 4, sz * Z + 4);
     }
     ctx.restore();
   };
 
   // My buildings
   for (const b of (view.myBuildings || [])) drawBuilding(b, null, true);
-
   // Enemy buildings
   for (const b of (view.visibleEnemyBuildings || [])) {
     const owner = playerMap[b.owner];
@@ -209,7 +240,6 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.lineWidth = 1;
     ctx.strokeRect(px, py, 3 * Z, 3 * Z);
 
-    // HP bar (only show when damaged)
     const maxHp = tc.maxHp || 500;
     if (tc.hp != null && tc.hp < maxHp) {
       const barW = 3 * Z;
@@ -229,13 +259,10 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.restore();
   };
 
-  // My TC
   if (view.myTc) {
     const me = playerMap[myId];
     drawTC(view.myTc, me?.color || "#c9a825", "TC");
   }
-
-  // Enemy TCs
   for (const tc of (view.visibleTownCenters || [])) {
     const owner = playerMap[tc.owner || tc.ownerId];
     drawTC(tc, owner?.color || "#c44", owner?.name?.substring(0, 4) || "?");
@@ -247,26 +274,21 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     const px = sx(veh.x), py = sy(veh.y);
     if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
 
-    const vc = VEH_COLORS[veh.type] || "#6a4a2a";
-    ctx.fillStyle = vc;
-    // Draw as a larger square
+    ctx.fillStyle = VEH_COLORS[veh.type] || "#6a4a2a";
     ctx.fillRect(px + 1, py + 1, Z - 2, Z - 2);
     ctx.strokeStyle = veh.crewId ? "#c9a825" : "#555";
     ctx.lineWidth = 1;
     ctx.strokeRect(px + 1, py + 1, Z - 2, Z - 2);
-    // Icon
     ctx.fillStyle = "#fff";
     ctx.font = `${Math.max(7, 8 * zoom)}px monospace`;
     ctx.textAlign = "center";
     ctx.fillText(VEH_ICONS[veh.type] || "⚙", px + Z / 2, py + Z / 2 + 3);
-    // HP bar
     if (veh.hp < veh.maxHp) {
       ctx.fillStyle = "#222";
       ctx.fillRect(px, py - 4, Z, 2);
       ctx.fillStyle = "#4a8";
       ctx.fillRect(px, py - 4, Z * (veh.hp / veh.maxHp), 2);
     }
-    // "Empty" indicator if no crew
     if (!veh.crewId) {
       ctx.fillStyle = "#ff8";
       ctx.font = `${Math.max(5, 6 * zoom)}px monospace`;
@@ -291,6 +313,46 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.fillText(VEH_ICONS[veh.type] || "⚙", px + Z / 2, py + Z / 2 + 3);
   }
 
+  // My naval units
+  for (const nu of (view.myNavalUnits || [])) {
+    if (!nu.alive) continue;
+    const px = sx(nu.x), py = sy(nu.y);
+    if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
+
+    ctx.fillStyle = "#3a5a7a";
+    ctx.fillRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.strokeStyle = "#c9a825";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.max(7, 8 * zoom)}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(NAVAL_ICONS[nu.type] || "⚓", px + Z / 2, py + Z / 2 + 3);
+    if (nu.hp < nu.maxHp) {
+      ctx.fillStyle = "#222";
+      ctx.fillRect(px, py - 4, Z, 2);
+      ctx.fillStyle = "#4a8";
+      ctx.fillRect(px, py - 4, Z * (nu.hp / nu.maxHp), 2);
+    }
+  }
+
+  // Enemy naval units
+  for (const nu of (view.visibleEnemyNaval || [])) {
+    const px = sx(nu.x), py = sy(nu.y);
+    if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
+
+    const owner = playerMap[nu.owner];
+    ctx.fillStyle = owner?.color || "#a05050";
+    ctx.fillRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.strokeStyle = owner?.color || "#c66";
+    ctx.lineWidth = 1;
+    ctx.strokeRect(px + 1, py + 1, Z - 2, Z - 2);
+    ctx.fillStyle = "#fff";
+    ctx.font = `${Math.max(7, 8 * zoom)}px monospace`;
+    ctx.textAlign = "center";
+    ctx.fillText(NAVAL_ICONS[nu.type] || "⚓", px + Z / 2, py + Z / 2 + 3);
+  }
+
   // My units
   for (const v of (view.myUnits || [])) {
     if (!v.alive) continue;
@@ -299,7 +361,7 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
 
     const sp = SP[v.spec] || SP.none;
 
-    // Mounted indicator: draw horse body under unit
+    // Mounted indicator
     if (v.mounted) {
       ctx.fillStyle = "#7a5a2a";
       ctx.fillRect(px + 1, py + Z * 0.4, Z - 2, Z * 0.5);
@@ -312,9 +374,18 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.beginPath();
     ctx.arc(px + Z / 2, py + Z / 2 - (v.mounted ? 2 : 0), Z * 0.38, 0, Math.PI * 2);
     ctx.fill();
-    ctx.strokeStyle = v.mounted ? "#c9a825" : "#c9a825";
+    ctx.strokeStyle = "#c9a825";
     ctx.lineWidth = v.mounted ? 1 : 0.5;
     ctx.stroke();
+
+    // Promotion icon (above spec stars)
+    const promoIcon = PROMO_ICONS[v.promotion];
+    if (promoIcon) {
+      ctx.fillStyle = "#ffd700";
+      ctx.font = `${Math.max(5, 6 * zoom)}px monospace`;
+      ctx.textAlign = "center";
+      ctx.fillText(promoIcon, px + Z / 2, py - (v.mounted ? 8 : 6));
+    }
 
     // Level stars
     if (v.specLv > 0) {
@@ -322,6 +393,15 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
       ctx.font = `bold ${Math.max(5, 6 * zoom)}px monospace`;
       ctx.textAlign = "center";
       ctx.fillText("★".repeat(Math.min(v.specLv, 3)), px + Z / 2, py - (v.mounted ? 4 : 2));
+    }
+
+    // Formation indicator
+    if (v.formation && v.formation !== "none") {
+      ctx.fillStyle = "#8af";
+      ctx.font = `${Math.max(4, 5 * zoom)}px monospace`;
+      ctx.textAlign = "center";
+      const fi = { line: "═", wedge: "▲", box: "□" };
+      ctx.fillText(fi[v.formation] || "", px + Z / 2, py + Z + 6);
     }
 
     // Mounted icon
@@ -347,7 +427,7 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     }
   }
 
-  // Enemy units (from other players)
+  // Enemy units
   for (const e of (view.visibleEnemyUnits || [])) {
     const px = sx(e.x), py = sy(e.y);
     if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
@@ -361,6 +441,15 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     ctx.lineWidth = 1;
     ctx.stroke();
 
+    // Promotion icon for enemy
+    const ePromoIcon = PROMO_ICONS[e.promotion];
+    if (ePromoIcon) {
+      ctx.fillStyle = "#ffd700";
+      ctx.font = `${Math.max(4, 5 * zoom)}px monospace`;
+      ctx.textAlign = "center";
+      ctx.fillText(ePromoIcon, px + Z / 2, py - 4);
+    }
+
     if (e.hp < (e.maxHp || 30)) {
       ctx.fillStyle = "#222";
       ctx.fillRect(px, py - 5, Z, 2);
@@ -369,7 +458,7 @@ export function render(ctx, view, cam, w, h, sel, myId, zoom = 1) {
     }
   }
 
-  // Neutral enemies (PvE)
+  // Neutral enemies
   for (const e of (view.neutralEnemies || [])) {
     const px = sx(e.x), py = sy(e.y);
     if (px < -Z * 2 || px > w + Z * 2 || py < -Z * 2 || py > h + Z * 2) continue;
@@ -453,9 +542,9 @@ export function renderMini(ctx, view, cam, cw, ch, myId, zoom = 1) {
       const fv = fog[y]?.[x] ?? FOG_UNK;
       if (fv < FOG_SEEN) continue;
       const tt = terrain[y]?.[x] ?? 0;
-      ctx.fillStyle = tt === 1
-        ? (fv === FOG_VIS ? "#1a2a3a" : "#0e1820")
-        : (fv === FOG_VIS ? "#1a2816" : "#10160e");
+      if (tt === 1) ctx.fillStyle = fv === FOG_VIS ? "#1a2a3a" : "#0e1820"; // water
+      else if (tt === 4) ctx.fillStyle = fv === FOG_VIS ? "#c4a868" : "#8a7a50"; // sand
+      else ctx.fillStyle = fv === FOG_VIS ? "#1a2816" : "#10160e"; // grass/hill/bridge
       ctx.fillRect(x * mx, y * my, mx + 0.5, my + 0.5);
     }
   }
@@ -468,6 +557,12 @@ export function renderMini(ctx, view, cam, cw, ch, myId, zoom = 1) {
     ctx.fillRect(r.x * mx, r.y * my, Math.max(1, mx), Math.max(1, my));
   }
   ctx.globalAlpha = 1;
+
+  // Relics
+  ctx.fillStyle = "#ffd700";
+  for (const r of (view.visibleRelics || [])) {
+    if (!r.housed) ctx.fillRect(r.x * mx - 1, r.y * my - 1, 3, 3);
+  }
 
   // Buildings
   for (const b of [...(view.myBuildings || []), ...(view.visibleEnemyBuildings || [])]) {
@@ -498,10 +593,14 @@ export function renderMini(ctx, view, cam, cw, ch, myId, zoom = 1) {
     if (hr.alive && !hr.riderId) ctx.fillRect(hr.x * mx - 0.5, hr.y * my - 0.5, 2, 2);
   }
 
-  // My vehicles
+  // My vehicles + naval
   ctx.fillStyle = "#ca8";
   for (const v of (view.myVehicles || [])) {
     if (v.alive) ctx.fillRect(v.x * mx - 0.5, v.y * my - 0.5, 3, 3);
+  }
+  ctx.fillStyle = "#4af";
+  for (const n of (view.myNavalUnits || [])) {
+    if (n.alive) ctx.fillRect(n.x * mx - 0.5, n.y * my - 0.5, 3, 3);
   }
 
   // My units
@@ -516,7 +615,7 @@ export function renderMini(ctx, view, cam, cw, ch, myId, zoom = 1) {
     ctx.fillRect(e.x * mx - 0.5, e.y * my - 0.5, 2, 2);
   }
 
-  // Camera viewport — use Z for zoomed tile size
+  // Camera viewport
   ctx.strokeStyle = "rgba(255,255,255,0.35)";
   ctx.lineWidth = 1;
   ctx.strokeRect(cam.x / Z * mx, cam.y / Z * my, cw / Z * mx, ch / Z * my);

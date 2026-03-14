@@ -18,6 +18,7 @@ import {
 } from "../shared/index.js";
 import { getPlayerView } from "./state-filter.js";
 import { runBotTick } from "./bot-player.js";
+import { recordMatch } from "../api/routes/leaderboard.js";
 
 const SLOT_IDS = ["p1", "p2", "p3", "p4"];
 
@@ -138,6 +139,7 @@ export class GameRoom {
     const gameConfig = {
       playerCount: this.playerSlots.length,
       enablePvE: this.config.enablePvE ?? false,
+      mapTheme: this.config.mapTheme || "default",
       players: this.playerSlots.map((s, i) => ({
         id: s.id,
         name: s.name,
@@ -226,6 +228,17 @@ export class GameRoom {
       this.replayMeta.ticks = this.state.tick;
       this._recordFrame(); // final frame
       console.log(`[GameRoom ${this.id}] Game over. Winner: ${this.state.winner}`);
+
+      // Record ELO for all players
+      const winnerSlot = this.playerSlots.find(s => s.id === this.state.winner);
+      if (winnerSlot) {
+        for (const slot of this.playerSlots) {
+          if (slot.id !== this.state.winner) {
+            recordMatch(winnerSlot.name, slot.name);
+          }
+        }
+      }
+
       this.status = "finished";
       this.stop();
     }
@@ -242,12 +255,30 @@ export class GameRoom {
 
     const valid = [];
     for (const cmd of commands) {
+      const cmdType = cmd.type || cmd.cmd || cmd.action;
+
+      // Non-unit commands go to _pendingCmds
+      const nonUnitCmds = ["advance_age", "tribute", "set_diplomacy", "train_naval"];
+      if (nonUnitCmds.includes(cmdType)) {
+        if (!player._pendingCmds) player._pendingCmds = [];
+        player._pendingCmds.push({
+          cmd: cmdType,
+          targetPlayerId: cmd.targetPlayerId ?? cmd.target_player_id,
+          resource: cmd.resource,
+          amount: cmd.amount,
+          status: cmd.status,
+          navalType: cmd.navalType ?? cmd.naval_type,
+          formation: cmd.formation,
+        });
+        continue;
+      }
+
       // Expand unitIds array into individual per-unit commands
       const ids = cmd.unitIds || cmd.unit_ids
         || (cmd.unitId != null ? [cmd.unitId] : (cmd.unit_id != null ? [cmd.unit_id] : []));
       for (const uid of ids) {
         const normalized = {
-          cmd: cmd.type || cmd.cmd || cmd.action,
+          cmd: cmdType,
           unitId: uid,
           targetId: cmd.targetId ?? cmd.target_id,
           buildType: cmd.buildType ?? cmd.build_type,
@@ -257,6 +288,7 @@ export class GameRoom {
           moveY: cmd.y ?? cmd.moveY,
           tag: cmd.tag,
           craftItem: cmd.craftItem ?? cmd.craft_item,
+          formation: cmd.formation,
         };
         if (validateCommand(normalized, player, this.state)) {
           valid.push(normalized);
@@ -348,6 +380,8 @@ export class GameRoom {
       resources: view.resources || [],
       horses: view.visibleHorses || [],
       vehicles: view.myVehicles || [],
+      navalUnits: view.myNavalUnits || [],
+      relics: view.visibleRelics || [],
       stockpile: { ...(view.myStockpile || {}) },
       buildings: view.myBuildings || [],
       tc: view.myTc || { x: 0, y: 0 },
@@ -355,6 +389,11 @@ export class GameRoom {
       tick: view.tick || 0,
       popCap: view.myPopCap || 4,
       tech: view.myTech || [],
+      age: view.myAge || "dark",
+      ageProgress: view.myAgeProgress || null,
+      relicCount: view.myRelicCount || 0,
+      diplomacy: view.diplomacy || {},
+      players: view.players || [],
       memory: player.memory || (player.memory = {}),
       items: ITEMS,
       neural: {
@@ -484,15 +523,24 @@ export class GameRoom {
         stockpile: { ...p.stockpile },
         tcHp: p.tc?.hp ?? 0,
         popCap: p.popCap,
+        age: p.age || "dark",
+        relicCount: p.relicCount || 0,
         units: p.units.filter(u => u.alive).map(u => ({
           id: u.id, x: u.x, y: u.y, hp: u.hp, spec: u.spec, cmd: u.cmd,
+          promotion: u.promotion,
         })),
         buildings: p.buildings.map(b => ({
           id: b.id, type: b.type, x: b.x, y: b.y, hp: b.hp, built: b.built,
         })),
+        navalUnits: (p.navalUnits || []).filter(n => n.alive).map(n => ({
+          id: n.id, type: n.type, x: n.x, y: n.y, hp: n.hp,
+        })),
       })),
       resources: this.state.resources.filter(r => r.amount > 0).map(r => ({
         id: r.id, type: r.type, x: r.x, y: r.y,
+      })),
+      relics: (this.state.relics || []).map(r => ({
+        id: r.id, x: r.x, y: r.y, carrier: r.carrier, housedBy: r.housedBy,
       })),
       horses: (this.state.horses || []).filter(h => h.alive).map(h => ({
         id: h.id, x: h.x, y: h.y, tamed: h.tamed, riderId: h.riderId,
@@ -539,6 +587,7 @@ export class GameRoom {
       spectator: true,
       mapWidth: this.state.mapWidth,
       mapHeight: this.state.mapHeight,
+      mapTheme: this.state.mapTheme || "default",
       players: this.state.players.map(p => ({
         id: p.id, name: p.name, color: p.color, eliminated: p.eliminated,
         stockpile: { ...p.stockpile },
@@ -547,11 +596,14 @@ export class GameRoom {
         unitCount: p.units.filter(u => u.alive).length,
         buildingCount: p.buildings.length,
         popCap: p.popCap,
+        age: p.age || "dark",
+        ageProgress: p.ageProgress || null,
+        relicCount: p.relicCount || 0,
       })),
       allUnits: this.state.players.flatMap(p =>
         p.units.filter(u => u.alive).map(u => ({
           id: u.id, owner: p.id, x: u.x, y: u.y, hp: u.hp, maxHp: u.maxHp,
-          spec: u.spec, cmd: u.cmd,
+          spec: u.spec, cmd: u.cmd, promotion: u.promotion, formation: u.formation,
         }))
       ),
       allBuildings: this.state.players.flatMap(p =>
@@ -560,8 +612,17 @@ export class GameRoom {
           maxHp: b.maxHp, built: b.built,
         }))
       ),
+      allNavalUnits: this.state.players.flatMap(p =>
+        (p.navalUnits || []).filter(n => n.alive).map(n => ({
+          id: n.id, owner: p.id, type: n.type, x: n.x, y: n.y,
+          hp: n.hp, maxHp: n.maxHp,
+        }))
+      ),
       resources: this.state.resources.filter(r => r.amount > 0).map(r => ({
         id: r.id, type: r.type, x: r.x, y: r.y,
+      })),
+      relics: (this.state.relics || []).map(r => ({
+        id: r.id, x: r.x, y: r.y, carrier: r.carrier, housedBy: r.housedBy,
       })),
       horses: (this.state.horses || []).filter(h => h.alive).map(h => ({
         id: h.id, x: h.x, y: h.y, tamed: h.tamed, riderId: h.riderId, owner: h.owner, alive: h.alive,
@@ -572,6 +633,7 @@ export class GameRoom {
           hp: v.hp, maxHp: v.maxHp, crewId: v.crewId,
         }))
       ),
+      diplomacy: this.state.diplomacy || {},
       gameOver: this.state.gameOver,
       winner: this.state.winner,
     };
