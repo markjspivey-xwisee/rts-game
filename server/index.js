@@ -19,6 +19,8 @@ import { initX402, createPaymentMiddleware, getX402Config } from "./x402-payment
 import { createWalletAuthRouter } from "./wallet-auth.js";
 import { initERC8004, createERC8004Router } from "./erc8004.js";
 import { createNFTWeightsRouter } from "./nft-weights.js";
+import { startScheduler, createScheduledTournamentRouter } from "./scheduled-tournaments.js";
+import { createRankedRouter } from "./ranked.js";
 
 const PORT = process.env.PORT || 3000;
 
@@ -44,6 +46,12 @@ app.use("/api/agents", createERC8004Router());
 
 // Mount NFT weights routes
 app.use("/api/nft-weights", createNFTWeightsRouter());
+
+// Mount scheduled tournament routes
+app.use("/api/tournaments/scheduled", createScheduledTournamentRouter());
+
+// Mount ranked season routes
+app.use("/api/ranked", createRankedRouter());
 
 // Mount API routes
 app.use(createApiRouter(lobby));
@@ -123,6 +131,16 @@ app.get("/api/docs", (_req, res) => {
       get: "GET /api/tournaments/:id",
       start: "POST /api/tournaments/:id/start",
     },
+    ranked_api: {
+      season: "GET /api/ranked/season - Current ranked season info",
+      standings: "GET /api/ranked/standings - Ranked leaderboard standings",
+      history: "GET /api/ranked/:playerId/history - Player ranked match history",
+    },
+    scheduled_tournament_api: {
+      list: "GET /api/tournaments/scheduled - List scheduled tournaments",
+      next: "GET /api/tournaments/scheduled/next - Next upcoming tournament",
+      trigger: "POST /api/tournaments/scheduled/trigger - Manually trigger next tournament",
+    },
     weights_api: {
       list: "GET /api/weights",
       download: "GET /api/weights/:id",
@@ -159,6 +177,7 @@ app.get("/api/docs", (_req, res) => {
     },
     map_themes: ["default", "desert", "island", "forest", "arena"],
     ages: ["dark", "feudal", "castle", "imperial"],
+    buildings: ["house", "farm", "barracks", "tower", "workshop", "market", "stable", "bridge", "wall", "gate", "dock", "temple", "castle_tower", "wonder", "monastery", "university"],
   });
 });
 
@@ -322,4 +341,7 @@ server.listen(PORT, () => {
   console.log(`[Server] RTS game server running on port ${PORT}`);
   console.log(`[Server] REST API: http://localhost:${PORT}/api/games`);
   console.log(`[Server] WebSocket: ws://localhost:${PORT}/?gameId=...&token=...`);
+
+  // Start scheduled tournament system
+  startScheduler(lobby);
 });

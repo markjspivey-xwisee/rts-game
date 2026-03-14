@@ -1,0 +1,28 @@
+{
+    "name": "@script-rts/eliza-plugin",
+    "version": "1.0.0",
+    "description": "Eliza (ai16z) plugin for the Script RTS game",
+    "main": "dist/plugin-rts.js",
+    "types": "dist/plugin-rts.d.ts",
+    "scripts": {
+        "build": "tsc",
+        "dev": "tsc --watch"
+    },
+    "keywords": [
+        "eliza",
+        "ai16z",
+        "rts",
+        "game",
+        "ai-agent",
+        "plugin"
+    ],
+    "dependencies": {
+        "@elizaos/core": "^0.1.0"
+    },
+    "devDependencies": {
+        "typescript": "^5.3.0"
+    },
+    "peerDependencies": {
+        "@elizaos/core": ">=0.1.0"
+    }
+}

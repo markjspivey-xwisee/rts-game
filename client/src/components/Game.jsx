@@ -11,6 +11,8 @@ const SP = {
   farmer:     { c: "#c4a035", l: "Farmer",      i: "🌾" },
   warrior:    { c: "#a83232", l: "Warrior",     i: "⚔" },
   builder:    { c: "#6a5a3a", l: "Builder",     i: "🔨" },
+  healer:     { c: "#e0e0ff", l: "Healer",      i: "✚" },
+  scout_rider:{ c: "#d4a017", l: "Scout Rider", i: "~" },
 };
 const BLD = {
   house:    { icon: "🏠", size: 2, hp: 100, pop: 4, cost: { wood: 30 }, age: "dark" },
@@ -27,6 +29,8 @@ const BLD = {
   temple:   { icon: "⛪", size: 2, hp: 180, unlocks: "faith", cost: { stone: 60, gold: 40 }, age: "castle" },
   castle_tower: { icon: "🏰", size: 1, hp: 400, range: 8, dmg: 8, cost: { stone: 80, gold: 30 }, age: "castle" },
   wonder:   { icon: "🏛", size: 3, hp: 600, cost: { wood: 200, stone: 200, gold: 200 }, age: "imperial" },
+  monastery:  { icon: "🙏", size: 2, hp: 160, unlocks: "healing", cost: { wood: 80, stone: 50, gold: 30 }, age: "castle" },
+  university: { icon: "📚", size: 2, hp: 140, unlocks: "research", cost: { wood: 60, stone: 40, gold: 60 }, age: "imperial" },
 };
 
 const AGE_ICONS = { dark: "🌑", feudal: "🏰", castle: "👑", imperial: "⭐" };
@@ -848,9 +852,9 @@ export default function Game({ gameId, playerId, token, onLeave }) {
       {/* Tech Tree */}
       <div style={{ marginBottom: 8, padding: "6px 8px", background: "rgba(255,255,255,0.03)", borderRadius: 3 }}>
         <div style={{ color: "#999", fontSize: 9, marginBottom: 4 }}>TECH TREE</div>
-        {["warrior_training", "tower", "trade", "horsemanship", "sailing", "faith"].map(t => {
+        {["warrior_training", "tower", "trade", "horsemanship", "sailing", "faith", "healing", "research"].map(t => {
           const unlocked = (ui.myTech || []).includes(t);
-          const techSrc = { warrior_training: "Barracks", tower: "Workshop", trade: "Market", horsemanship: "Stable", sailing: "Dock", faith: "Temple" };
+          const techSrc = { warrior_training: "Barracks", tower: "Workshop", trade: "Market", horsemanship: "Stable", sailing: "Dock", faith: "Temple", healing: "Monastery", research: "University" };
           return (
             <div key={t} style={{ color: unlocked ? "#c9a825" : "#555", marginBottom: 2, display: "flex", gap: 6 }}>
               <span>{unlocked ? "✅" : "🔒"}</span>

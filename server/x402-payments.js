@@ -8,6 +8,12 @@
 //
 // Free tier:  create/join games, basic state, 2 concurrent games
 // Paid tier:  unlimited games, faster ticks, training, tournaments
+//
+// Networks:
+//   Base Sepolia (testnet): eip155:84532 (default)
+//   Base Mainnet:           eip155:8453
+//
+// Set X402_NETWORK env var to switch. Use X402_MAINNET=true as shortcut.
 // ═══════════════════════════════════════════════════════════════════════════
 
 let paymentMiddleware, x402ResourceServer, ExactEvmScheme, HTTPFacilitatorClient;
@@ -16,8 +22,28 @@ let x402Enabled = false;
 // Payment recipient wallet address (set via env or defaults to zero for testing)
 const PAY_TO = process.env.X402_PAY_TO || "0x0000000000000000000000000000000000000000";
 
-// Network: Base Sepolia testnet by default, Base mainnet for production
-const NETWORK = process.env.X402_NETWORK || "eip155:84532";
+// Network configuration
+// X402_MAINNET=true is a shortcut to switch to Base mainnet
+const CHAIN_CONFIG = {
+  testnet: {
+    network: "eip155:84532",
+    name: "Base Sepolia (testnet)",
+    rpcUrl: "https://sepolia.base.org",
+    currency: "USDC",
+    blockExplorer: "https://sepolia.basescan.org",
+  },
+  mainnet: {
+    network: "eip155:8453",
+    name: "Base Mainnet",
+    rpcUrl: "https://mainnet.base.org",
+    currency: "USDC",
+    blockExplorer: "https://basescan.org",
+  },
+};
+
+const isMainnet = process.env.X402_MAINNET === "true";
+const activeChain = isMainnet ? CHAIN_CONFIG.mainnet : CHAIN_CONFIG.testnet;
+const NETWORK = process.env.X402_NETWORK || activeChain.network;
 
 // Facilitator URL
 const FACILITATOR_URL = process.env.X402_FACILITATOR || "https://x402.org/facilitator";
@@ -49,9 +75,12 @@ export async function initX402() {
 
     x402Enabled = true;
     console.log("[x402] Payment system initialized");
-    console.log(`[x402] Network: ${NETWORK}`);
+    console.log(`[x402] Network: ${NETWORK} (${activeChain.name})`);
     console.log(`[x402] Facilitator: ${FACILITATOR_URL}`);
     console.log(`[x402] Pay to: ${PAY_TO}`);
+    if (isMainnet) {
+      console.log("[x402] *** MAINNET MODE - real payments enabled ***");
+    }
   } catch (err) {
     console.warn("[x402] Payment packages not available, running in free mode:", err.message);
     x402Enabled = false;
@@ -112,14 +141,21 @@ export function getX402Config() {
   return {
     enabled: x402Enabled,
     network: NETWORK,
+    activeChain: activeChain.name,
+    isMainnet,
     facilitator: FACILITATOR_URL,
     payTo: PAY_TO,
     prices: PRICES,
     supportedChains: [
-      { id: "eip155:84532", name: "Base Sepolia (testnet)", currency: "USDC" },
-      { id: "eip155:8453", name: "Base Mainnet", currency: "USDC" },
+      { id: "eip155:84532", name: "Base Sepolia (testnet)", currency: "USDC", active: NETWORK === "eip155:84532" },
+      { id: "eip155:8453", name: "Base Mainnet", currency: "USDC", active: NETWORK === "eip155:8453" },
     ],
+    // Mainnet config reference:
+    //   X402_MAINNET=true
+    //   X402_NETWORK=eip155:8453
+    //   X402_PAY_TO=<your mainnet wallet>
+    //   X402_FACILITATOR=https://x402.org/facilitator
   };
 }
 
-export { x402Enabled, PRICES };
+export { x402Enabled, PRICES, isMainnet, NETWORK, activeChain };

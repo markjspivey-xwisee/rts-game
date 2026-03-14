@@ -10,8 +10,10 @@ export const SP = {
   lumberjack: { c: "#4a8c3f", l: "Lumberjack", i: "🪓" },
   miner:      { c: "#7a7a8e", l: "Miner",      i: "⛏" },
   farmer:     { c: "#c4a035", l: "Farmer",      i: "🌾" },
-  warrior:    { c: "#a83232", l: "Warrior",     i: "⚔" },
-  builder:    { c: "#6a5a3a", l: "Builder",     i: "🔨" },
+  warrior:      { c: "#a83232", l: "Warrior",      i: "⚔" },
+  builder:      { c: "#6a5a3a", l: "Builder",      i: "🔨" },
+  healer:       { c: "#e0e0ff", l: "Healer",       i: "✚", dmg: 1, gather: { food: 0.3 }, buildSpd: 0 },
+  scout_rider:  { c: "#d4a017", l: "Scout Rider",  i: "🏇", dmg: 3, gather: {}, buildSpd: 0 },
 };
 
 /** Enemy (NPC raid) types */
@@ -20,6 +22,7 @@ export const ET = {
   brute:  { hp: 55, dmg: 6, spd: 0.5, c: "#8a3030", ranged: false },
   archer: { hp: 22, dmg: 3, spd: 1, c: "#a06050", ranged: true, range: 4 },
   raider: { hp: 30, dmg: 4, spd: 1, c: "#a04040", ranged: false },
+  siege:  { hp: 80, dmg: 8, spd: 0.3, c: "#5a3a3a", ranged: false },
 };
 
 /** Naval unit types */

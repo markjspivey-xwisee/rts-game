@@ -19,7 +19,9 @@ export const BLD = {
   // ── Castle Age ──
   temple:   { cost: { stone: 60, gold: 40 }, size: 2, color: "#8a7a6a", hp: 180, bt: 45, icon: "⛪", unlocks: ["faith"], age: "castle" },
   castle_tower: { cost: { stone: 80, gold: 30 }, size: 1, color: "#5a5a7a", hp: 400, bt: 60, range: 8, dmg: 8, icon: "🏰", requires: "tower", age: "castle" },
+  monastery:    { cost: { wood: 80, stone: 50, gold: 30 }, size: 2, color: "#b0a0d0", hp: 160, bt: 40, icon: "🙏", unlocks: ["healing"], age: "castle" },
   // ── Imperial Age ──
+  university: { cost: { wood: 60, stone: 40, gold: 60 }, size: 2, color: "#4a6a8a", hp: 140, bt: 45, icon: "🎓", unlocks: ["research"], age: "imperial" },
   wonder:   { cost: { wood: 200, stone: 200, gold: 200 }, size: 3, color: "#c4a035", hp: 600, bt: 200, icon: "🏛", age: "imperial" },
 };
 

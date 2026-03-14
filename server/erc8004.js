@@ -6,10 +6,17 @@
 //   - Identity Registry: agents register as NFTs with on-chain identity
 //   - Reputation Registry: game results posted as reputation feedback
 //
-// Uses the canonical deployed contracts on Base Sepolia:
-//   - IdentityRegistry: 0x8004A818BFB912233c491871b3d84c89A494BD9e
-//   - ReputationRegistry: 0x8004B663056A597Dffe9eCcC1965A193B7388713
+// Contract addresses:
 //
+//   Base Sepolia (testnet):
+//     IdentityRegistry:   0x8004A818BFB912233c491871b3d84c89A494BD9e
+//     ReputationRegistry: 0x8004B663056A597Dffe9eCcC1965A193B7388713
+//
+//   Base Mainnet (same vanity prefix, deployed at matching addresses):
+//     IdentityRegistry:   0x8004A818BFB912233c491871b3d84c89A494BD9e
+//     ReputationRegistry: 0x8004B663056A597Dffe9eCcC1965A193B7388713
+//
+// Set X402_MAINNET=true to switch both x402 and ERC-8004 to mainnet.
 // Agents register via API, server submits on-chain tx with server wallet.
 // ═══════════════════════════════════════════════════════════════════════════
 
@@ -36,14 +43,32 @@ const REPUTATION_REGISTRY_ABI = [
   "event NewFeedback(uint256 indexed agentId, address indexed clientAddress, uint64 feedbackIndex, int128 value, uint8 valueDecimals, string indexed indexedTag1, string tag1, string tag2, string endpoint, string feedbackURI, bytes32 feedbackHash)",
 ];
 
-// Known contract addresses (set via env vars)
+// Network selection: X402_MAINNET=true switches to Base mainnet
+const isMainnet = process.env.X402_MAINNET === "true";
+
+// Contract addresses by network
+// Same vanity prefix 0x8004... on both networks (CREATE2 deterministic deploy)
+const CONTRACT_ADDRESSES = {
+  testnet: {
+    identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",
+    reputationRegistry: "0x8004B663056A597Dffe9eCcC1965A193B7388713",
+  },
+  mainnet: {
+    identityRegistry: "0x8004A818BFB912233c491871b3d84c89A494BD9e",   // same address via CREATE2
+    reputationRegistry: "0x8004B663056A597Dffe9eCcC1965A193B7388713", // same address via CREATE2
+  },
+};
+
+const activeContracts = isMainnet ? CONTRACT_ADDRESSES.mainnet : CONTRACT_ADDRESSES.testnet;
+
+// Known contract addresses (env vars override defaults)
 const CONTRACTS = {
   identityRegistry: process.env.ERC8004_IDENTITY_REGISTRY || null,
   reputationRegistry: process.env.ERC8004_REPUTATION_REGISTRY || null,
 };
 
-const RPC_URL = process.env.ERC8004_RPC_URL || "https://sepolia.base.org";
-const CHAIN_ID = process.env.ERC8004_CHAIN_ID || "84532";
+const RPC_URL = process.env.ERC8004_RPC_URL || (isMainnet ? "https://mainnet.base.org" : "https://sepolia.base.org");
+const CHAIN_ID = process.env.ERC8004_CHAIN_ID || (isMainnet ? "8453" : "84532");
 const SERVER_PRIVATE_KEY = process.env.SERVER_WALLET_PRIVATE_KEY || null;
 
 // In-memory agent registry (mirrors on-chain for fast lookups)
@@ -62,6 +87,9 @@ export async function initERC8004() {
   if (!CONTRACTS.identityRegistry) {
     console.log("[ERC-8004] No contract addresses configured, running in local-only mode");
     console.log("[ERC-8004] Set ERC8004_IDENTITY_REGISTRY env var to enable on-chain features");
+    console.log(`[ERC-8004] Default addresses for ${isMainnet ? "mainnet" : "testnet"}:`);
+    console.log(`[ERC-8004]   IdentityRegistry:   ${activeContracts.identityRegistry}`);
+    console.log(`[ERC-8004]   ReputationRegistry: ${activeContracts.reputationRegistry}`);
     return;
   }
 
@@ -86,7 +114,10 @@ export async function initERC8004() {
     }
 
     erc8004Enabled = true;
-    console.log(`[ERC-8004] Connected to ${RPC_URL} (chain ${CHAIN_ID})`);
+    console.log(`[ERC-8004] Connected to ${RPC_URL} (chain ${CHAIN_ID}, ${isMainnet ? "mainnet" : "testnet"})`);
+    if (isMainnet) {
+      console.log("[ERC-8004] *** MAINNET MODE - real on-chain transactions ***");
+    }
   } catch (err) {
     console.warn("[ERC-8004] Failed to initialize:", err.message);
   }
@@ -255,8 +286,9 @@ export function createERC8004Router() {
         fullId: `eip155:${CHAIN_ID}:${CONTRACTS.identityRegistry || "local"}:${agent.agentId}`,
       },
       onChain: erc8004Enabled,
+      isMainnet,
       message: erc8004Enabled
-        ? "Agent registered. On-chain registration submitted (may take a few seconds to confirm)."
+        ? `Agent registered. On-chain registration submitted on ${isMainnet ? "Base Mainnet" : "Base Sepolia"} (may take a few seconds to confirm).`
         : "Agent registered locally. Set ERC8004_IDENTITY_REGISTRY to enable on-chain registration.",
     });
   });
@@ -283,6 +315,7 @@ export function createERC8004Router() {
         reputationRegistry: CONTRACTS.reputationRegistry,
         chainId: CHAIN_ID,
         rpcUrl: RPC_URL,
+        isMainnet,
       },
       erc8004Enabled,
     });
@@ -303,6 +336,7 @@ export function createERC8004Router() {
         agentId: agent.agentId,
         chainAgentId: agent.chainAgentId,
         fullId: `eip155:${CHAIN_ID}:${CONTRACTS.identityRegistry || "local"}:${agent.chainAgentId || agent.agentId}`,
+        isMainnet,
       },
     });
   });
@@ -363,7 +397,9 @@ export function createERC8004Router() {
   router.get("/config/info", (_req, res) => {
     res.json({
       erc8004Enabled,
+      isMainnet,
       contracts: CONTRACTS,
+      defaultContracts: activeContracts,
       chainId: CHAIN_ID,
       rpcUrl: RPC_URL,
       serverWallet: signer?.address || null,
@@ -376,8 +412,9 @@ export function createERC8004Router() {
         step2: "Use wallet auth: GET /api/auth/nonce -> sign -> POST /api/auth/verify",
         step3: "Play games, ELO and reputation tracked automatically",
         onChain: erc8004Enabled
-          ? "On-chain registration active. Agents are registered as NFTs on Base Sepolia."
+          ? `On-chain registration active on ${isMainnet ? "Base Mainnet" : "Base Sepolia"}.`
           : "Set ERC8004_IDENTITY_REGISTRY to enable on-chain registration.",
+        mainnet: "Set X402_MAINNET=true to switch to Base Mainnet for both x402 and ERC-8004.",
       },
     });
   });
@@ -385,4 +422,4 @@ export function createERC8004Router() {
   return router;
 }
 
-export { agentRegistry, erc8004Enabled, CONTRACTS };
+export { agentRegistry, erc8004Enabled, CONTRACTS, isMainnet };

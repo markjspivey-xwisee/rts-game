@@ -20,6 +20,14 @@ export default function Lobby({ onJoinGame }) {
   const [weightsList, setWeightsList] = useState([]);
   const [uploadForm, setUploadForm] = useState({ name: "", description: "", json: "" });
   const [leaderboard, setLeaderboard] = useState([]);
+  const [walletAddress, setWalletAddress] = useState(null);
+  const [walletToken, setWalletToken] = useState(null);
+  const [walletStatus, setWalletStatus] = useState(null); // 'connecting', 'connected', 'error'
+  const [agentProfile, setAgentProfile] = useState(null);
+  const [rankedSeason, setRankedSeason] = useState(null);
+  const [rankedStandings, setRankedStandings] = useState([]);
+  const [scheduledTournaments, setScheduledTournaments] = useState([]);
+  const [nextTournament, setNextTournament] = useState(null);
 
   useEffect(() => {
     const load = async () => {
@@ -59,6 +67,43 @@ export default function Lobby({ onJoinGame }) {
     };
     loadLb();
     const iv = setInterval(loadLb, 5000);
+    return () => clearInterval(iv);
+  }, [tab]);
+
+  // Load ranked season and scheduled tournaments when relevant tabs are active
+  useEffect(() => {
+    if (tab !== "leaderboard" && tab !== "crypto") return;
+    const loadRanked = async () => {
+      try {
+        const [seasonRes, standingsRes, schedRes, nextRes] = await Promise.all([
+          fetch(`${API}/ranked/season`),
+          fetch(`${API}/ranked/standings`),
+          fetch(`${API}/tournaments/scheduled`),
+          fetch(`${API}/tournaments/scheduled/next`),
+        ]);
+        if (seasonRes.ok) setRankedSeason(await seasonRes.json());
+        if (standingsRes.ok) { const d = await standingsRes.json(); setRankedStandings(d.standings || []); }
+        if (schedRes.ok) { const d = await schedRes.json(); setScheduledTournaments(d.tournaments || []); }
+        if (nextRes.ok) setNextTournament(await nextRes.json());
+      } catch {}
+    };
+    loadRanked();
+  }, [tab]);
+
+  useEffect(() => {
+    if (tab !== "ranked") return;
+    const loadRanked = async () => {
+      try {
+        const [seasonRes, standingsRes] = await Promise.all([
+          fetch(`${API}/ranked/season`),
+          fetch(`${API}/ranked/standings`),
+        ]);
+        if (seasonRes.ok) setRankedSeason(await seasonRes.json());
+        if (standingsRes.ok) { const d = await standingsRes.json(); setRankedStandings(d.standings || []); }
+      } catch {}
+    };
+    loadRanked();
+    const iv = setInterval(loadRanked, 10000);
     return () => clearInterval(iv);
   }, [tab]);
 
@@ -174,6 +219,70 @@ export default function Lobby({ onJoinGame }) {
     } catch (e) { setErr(e.message); }
   };
 
+  const connectWallet = async () => {
+    if (!window.ethereum) { setErr("No wallet detected. Install MetaMask or similar."); return; }
+    setWalletStatus("connecting");
+    try {
+      const accounts = await window.ethereum.request({ method: "eth_requestAccounts" });
+      const address = accounts[0];
+      setWalletAddress(address);
+
+      // Get nonce
+      const nonceRes = await fetch(`${API}/auth/nonce?address=${address}`);
+      const { nonce, message } = await nonceRes.json();
+
+      // Sign message
+      const signature = await window.ethereum.request({
+        method: "personal_sign",
+        params: [message, address],
+      });
+
+      // Verify and get token
+      const verifyRes = await fetch(`${API}/auth/verify`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ address, signature, nonce }),
+      });
+      const verifyData = await verifyRes.json();
+
+      if (verifyData.token) {
+        setWalletToken(verifyData.token);
+        setWalletStatus("connected");
+        setAgentProfile(verifyData);
+
+        // Try to load agent profile
+        try {
+          const agentRes = await fetch(`${API}/agents/by-wallet/${address}`);
+          if (agentRes.ok) setAgentProfile(await agentRes.json());
+        } catch {}
+      } else {
+        setWalletStatus("error");
+        setErr(verifyData.error || "Wallet verification failed");
+      }
+    } catch (e) {
+      setWalletStatus("error");
+      setErr(e.message);
+    }
+  };
+
+  const registerAgent = async () => {
+    if (!walletAddress) return;
+    try {
+      const res = await fetch(`${API}/agents/register`, {
+        method: "POST", headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ walletAddress, name: name.trim() || "Agent" }),
+      });
+      const data = await res.json();
+      if (data.agent) setAgentProfile(data.agent);
+    } catch (e) { setErr(e.message); }
+  };
+
+  const disconnectWallet = () => {
+    setWalletAddress(null);
+    setWalletToken(null);
+    setWalletStatus(null);
+    setAgentProfile(null);
+  };
+
   const style = {
     minHeight: "100vh", background: "#0f1410", color: "#c8c0a8",
     fontFamily: "'Courier New',monospace", padding: "20px 0",
@@ -277,6 +386,7 @@ curl -X POST ${host}/api/games \\
         {tabBtn("play", "Play")}
         {tabBtn("watch", "Watch")}
         {tabBtn("leaderboard", "ELO")}
+        {tabBtn("ranked", "Ranked")}
         {tabBtn("weights", "Weights")}
         {tabBtn("agents", "Agents")}
         {tabBtn("api", "API")}
@@ -652,13 +762,123 @@ curl ${host}/api/training/<id>/best > weights.json`}</pre>
       {/* CRYPTO / WEB3 */}
       {tab === "crypto" && (
         <div style={card}>
-          <h2 style={h2s}>Web3 Agent Identity & Payments</h2>
-          <p style={dim}>
-            Authenticate with your wallet, pay for premium features with USDC, and build on-chain reputation.
-          </p>
+          <h2 style={h2s}>Web3 Agent Platform</h2>
+
+          {/* Wallet Connect */}
+          <div style={{ background: "rgba(74,153,100,0.1)", border: "1px solid #2a5040", borderRadius: 6, padding: 16, marginBottom: 16 }}>
+            {!walletAddress ? (
+              <div style={{ textAlign: "center" }}>
+                <button onClick={connectWallet} style={{ ...B, background: "#2a6a3a", color: "#8f8", fontSize: 14, padding: "12px 32px" }}
+                  disabled={walletStatus === "connecting"}>
+                  {walletStatus === "connecting" ? "Connecting..." : "Connect Wallet"}
+                </button>
+                <p style={{ ...dim, marginTop: 8 }}>MetaMask, Coinbase Wallet, or any EIP-1193 wallet</p>
+              </div>
+            ) : (
+              <div>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                  <div>
+                    <span style={{ color: "#4a9", fontSize: 10 }}>CONNECTED</span>
+                    <div style={{ color: "#ccc", fontSize: 13, fontFamily: "monospace" }}>
+                      {walletAddress.slice(0, 6)}...{walletAddress.slice(-4)}
+                    </div>
+                  </div>
+                  <button onClick={disconnectWallet} style={{ ...B, fontSize: 10, padding: "4px 10px" }}>Disconnect</button>
+                </div>
+
+                {agentProfile ? (
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8, marginTop: 8 }}>
+                    <div style={{ background: "#1a2420", padding: 8, borderRadius: 4, textAlign: "center" }}>
+                      <div style={{ color: "#666", fontSize: 9 }}>AGENT</div>
+                      <div style={{ color: "#c9a825", fontSize: 14 }}>{agentProfile.name || `#${agentProfile.agentId}`}</div>
+                    </div>
+                    <div style={{ background: "#1a2420", padding: 8, borderRadius: 4, textAlign: "center" }}>
+                      <div style={{ color: "#666", fontSize: 9 }}>ELO</div>
+                      <div style={{ color: "#4a9", fontSize: 14 }}>{agentProfile.elo || 1000}</div>
+                    </div>
+                    <div style={{ background: "#1a2420", padding: 8, borderRadius: 4, textAlign: "center" }}>
+                      <div style={{ color: "#666", fontSize: 9 }}>RECORD</div>
+                      <div style={{ fontSize: 14 }}>
+                        <span style={{ color: "#4a8" }}>{agentProfile.wins || 0}W</span>
+                        {" / "}
+                        <span style={{ color: "#c44" }}>{agentProfile.losses || 0}L</span>
+                      </div>
+                    </div>
+                  </div>
+                ) : (
+                  <button onClick={registerAgent} style={{ ...B, background: "#2a4a2a", color: "#8f8", width: "100%", marginTop: 8, textAlign: "center" }}>
+                    Register as ERC-8004 Agent
+                  </button>
+                )}
+              </div>
+            )}
+          </div>
+
+          {/* Ranked Season */}
+          {rankedSeason && (
+            <div style={{ background: "rgba(201,168,37,0.08)", border: "1px solid #3a3520", borderRadius: 6, padding: 16, marginBottom: 16 }}>
+              <h3 style={{ color: "#c9a825", fontSize: 13, margin: "0 0 8px" }}>
+                Ranked Season {rankedSeason.season}
+              </h3>
+              <div style={{ display: "flex", gap: 16, fontSize: 11, marginBottom: 10 }}>
+                <span style={{ color: "#888" }}>Days left: <span style={{ color: "#ccc" }}>{rankedSeason.daysRemaining}</span></span>
+              </div>
+              <div style={{ display: "flex", gap: 6, fontSize: 10, flexWrap: "wrap", marginBottom: 10 }}>
+                {[
+                  ["Bronze", "#cd7f32", "0-1099"],
+                  ["Silver", "#c0c0c0", "1100-1299"],
+                  ["Gold", "#ffd700", "1300-1499"],
+                  ["Platinum", "#00c8ff", "1500-1699"],
+                  ["Diamond", "#b9f2ff", "1700+"],
+                ].map(([rank, color, range]) => (
+                  <span key={rank} style={{ padding: "2px 8px", borderRadius: 3, border: `1px solid ${color}40`, color }}>
+                    {rank} {range}
+                  </span>
+                ))}
+              </div>
+              {rankedStandings.length > 0 && (
+                <div>
+                  {rankedStandings.slice(0, 5).map((p, i) => (
+                    <div key={p.name} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 11, color: "#aaa" }}>
+                      <span>{i + 1}. {p.name}</span>
+                      <span style={{ color: "#4a9" }}>{p.elo} - <span style={{ color: p.rankColor || "#cd7f32" }}>{p.rank}</span></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
+          {/* Scheduled Tournaments */}
+          <div style={{ background: "rgba(100,74,153,0.08)", border: "1px solid #302a50", borderRadius: 6, padding: 16, marginBottom: 16 }}>
+            <h3 style={{ color: "#a875d0", fontSize: 13, margin: "0 0 8px" }}>Auto Tournaments</h3>
+            {nextTournament && (
+              <p style={{ ...dim, marginBottom: 8 }}>
+                Next tournament: <span style={{ color: "#ccc" }}>{nextTournament.nextIn || "soon"}</span>
+                {" | "}Agents: <span style={{ color: "#ccc" }}>{nextTournament.registeredAgents || 0}</span>
+              </p>
+            )}
+            <button onClick={async () => {
+              try { await fetch(`${API}/tournaments/scheduled/trigger`, { method: "POST" }); setErr(null); } catch {}
+            }} style={{ ...B, fontSize: 10, padding: "4px 12px" }}>Trigger Tournament Now</button>
+
+            {scheduledTournaments.length > 0 && (
+              <div style={{ marginTop: 10 }}>
+                <div style={{ color: "#666", fontSize: 10, marginBottom: 4 }}>RECENT</div>
+                {scheduledTournaments.slice(0, 3).map((t, i) => (
+                  <div key={i} style={{ fontSize: 10, color: "#888", padding: "2px 0" }}>
+                    {t.name} - Winner: <span style={{ color: "#c9a825" }}>{t.winner || "TBD"}</span>
+                    {" "}({t.participants} participants)
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+
+          {/* x402, ERC-8004, NFT docs - keep existing content below */}
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>API REFERENCE</h3>
 
           <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>WALLET AUTHENTICATION</h3>
-          <p style={dim}>Use your Ethereum wallet instead of bearer tokens. Works with Coinbase AgentKit agentic wallets.</p>
           <pre style={code}>{`# 1. Get a nonce to sign
 curl ${host}/api/auth/nonce?address=0xYourWallet
 
@@ -668,8 +888,7 @@ curl -X POST ${host}/api/auth/verify \\
   -d '{"address":"0x...","signature":"0x...","nonce":"..."}'
 # Returns: { token } - use as Bearer auth`}</pre>
 
-          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>x402 PAYMENTS (HTTP 402)</h3>
-          <p style={dim}>Premium features gated by USDC micropayments on Base. AI agents pay automatically.</p>
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>x402 PAYMENTS</h3>
           <div style={{ display: "grid", gridTemplateColumns: "1fr auto", gap: "2px 12px", fontSize: 11, padding: "8px 0" }}>
             {[
               ["Premium game creation", "$0.001"],
@@ -685,28 +904,15 @@ curl -X POST ${host}/api/auth/verify \\
           </div>
 
           <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>ERC-8004 AGENT IDENTITY</h3>
-          <p style={dim}>Register as a trustless on-chain agent. Get verifiable identity, portable reputation, and match history.</p>
-          <pre style={code}>{`# Register your agent
-curl -X POST ${host}/api/agents/register \\
-  -H "Content-Type: application/json" \\
+          <pre style={code}>{`curl -X POST ${host}/api/agents/register \\
   -d '{"walletAddress":"0x...","name":"MyBot"}'
-
-# Check reputation
 curl ${host}/api/agents/1/reputation
-
-# ERC-8004 config & contract ABIs
 curl ${host}/api/agents/config/info`}</pre>
 
           <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>NFT WEIGHTS (ERC-6551)</h3>
-          <p style={dim}>Mint trained neural net weights as NFTs. Each gets a Token Bound Account that can hold tournament winnings.</p>
-          <pre style={code}>{`# Mint weights as NFT
-curl -X POST ${host}/api/nft-weights/mint \\
-  -H "Content-Type: application/json" \\
+          <pre style={code}>{`curl -X POST ${host}/api/nft-weights/mint \\
   -d '{"ownerAddress":"0x...","weights":{...},"name":"Rush v3"}'
-
-# List for sale
-curl -X POST ${host}/api/nft-weights/1/list \\
-  -d '{"price":"$1.00"}'`}</pre>
+curl -X POST ${host}/api/nft-weights/1/list -d '{"price":"$1.00"}'`}</pre>
 
           <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>SUPPORTED STANDARDS</h3>
           <div style={{ fontSize: 11, lineHeight: 1.8 }}>
@@ -756,6 +962,25 @@ curl -X POST ${host}/api/nft-weights/1/list \\
             </div>
           )}
 
+          {rankedSeason && (
+            <div style={{ marginTop: 16 }}>
+              <h3 style={{ color: "#c9a825", fontSize: 12, margin: "0 0 8px" }}>RANKED SEASON {rankedSeason.season}</h3>
+              <p style={dim}>
+                {rankedSeason.daysRemaining} days remaining | Ranks: Bronze, Silver, Gold, Platinum, Diamond
+              </p>
+              {rankedStandings.length > 0 && (
+                <div style={{ marginTop: 8 }}>
+                  {rankedStandings.slice(0, 10).map((p, i) => (
+                    <div key={p.name} style={{ display: "flex", justifyContent: "space-between", padding: "3px 0", fontSize: 11 }}>
+                      <span style={{ color: "#aaa" }}>{i + 1}. {p.name}</span>
+                      <span><span style={{ color: "#4a9" }}>{p.elo}</span> <span style={{ color: p.rankColor || "#cd7f32" }}>{p.rank}</span></span>
+                    </div>
+                  ))}
+                </div>
+              )}
+            </div>
+          )}
+
           <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>TOURNAMENTS</h3>
           <p style={dim}>Create bracket tournaments via the API. Bot participants compete automatically.</p>
           <pre style={code}>{`# Create a tournament
@@ -768,6 +993,71 @@ curl -X POST ${host}/api/tournaments/<id>/start
 
 # Check results
 curl ${host}/api/tournaments/<id>`}</pre>
+        </div>
+      )}
+
+      {/* RANKED */}
+      {tab === "ranked" && (
+        <div style={card}>
+          <h2 style={h2s}>Ranked Seasons</h2>
+          <p style={dim}>Competitive seasons with rank tiers. ELO soft-resets each season.</p>
+
+          {rankedSeason ? (
+            <div>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 16 }}>
+                <div>
+                  <div style={{ color: "#c9a825", fontSize: 18 }}>Season {rankedSeason.season}</div>
+                  <div style={{ color: "#888", fontSize: 11 }}>{rankedSeason.daysRemaining} days remaining</div>
+                </div>
+              </div>
+
+              <div style={{ display: "flex", gap: 6, fontSize: 10, flexWrap: "wrap", marginBottom: 16 }}>
+                {[
+                  ["Bronze", "#cd7f32"], ["Silver", "#c0c0c0"], ["Gold", "#ffd700"],
+                  ["Platinum", "#00c8ff"], ["Diamond", "#b9f2ff"],
+                ].map(([rank, color]) => (
+                  <span key={rank} style={{ padding: "3px 10px", borderRadius: 3, border: `1px solid ${color}40`, color }}>{rank}</span>
+                ))}
+              </div>
+
+              {rankedStandings.length > 0 ? (
+                <div>
+                  <div style={{ display: "flex", gap: 8, padding: "4px 8px", fontSize: 10, color: "#666", borderBottom: "1px solid #2a3020" }}>
+                    <span style={{ width: 30 }}>#</span>
+                    <span style={{ flex: 1 }}>Player</span>
+                    <span style={{ width: 60, textAlign: "right" }}>ELO</span>
+                    <span style={{ width: 50, textAlign: "right" }}>Rank</span>
+                    <span style={{ width: 40, textAlign: "right" }}>W</span>
+                    <span style={{ width: 40, textAlign: "right" }}>L</span>
+                  </div>
+                  {rankedStandings.map((p, i) => (
+                    <div key={p.name} style={{
+                      display: "flex", gap: 8, padding: "6px 8px", fontSize: 11,
+                      background: i % 2 === 0 ? "rgba(255,255,255,0.02)" : "transparent",
+                    }}>
+                      <span style={{ width: 30, color: i < 3 ? "#c9a825" : "#555" }}>{i + 1}</span>
+                      <span style={{ flex: 1, color: "#ccc" }}>{p.name}</span>
+                      <span style={{ width: 60, textAlign: "right", color: "#4a9" }}>{p.elo}</span>
+                      <span style={{ width: 50, textAlign: "right", color: p.rankColor || "#cd7f32" }}>{p.rank}</span>
+                      <span style={{ width: 40, textAlign: "right", color: "#4a8" }}>{p.wins}</span>
+                      <span style={{ width: 40, textAlign: "right", color: "#c44" }}>{p.losses}</span>
+                    </div>
+                  ))}
+                </div>
+              ) : (
+                <p style={{ color: "#555", fontSize: 12 }}>No ranked games this season yet.</p>
+              )}
+            </div>
+          ) : (
+            <p style={{ color: "#555", fontSize: 12 }}>Loading season data...</p>
+          )}
+
+          <h3 style={{ color: "#999", fontSize: 12, margin: "16px 0 6px" }}>SEASON RULES</h3>
+          <div style={{ fontSize: 11, lineHeight: 1.8, color: "#888" }}>
+            <div>Each season lasts 30 days</div>
+            <div>Soft ELO reset at season start: newELO = 1000 + (oldELO - 1000) * 0.5</div>
+            <div>Rank tiers: Bronze (0-1099), Silver (1100-1299), Gold (1300-1499), Platinum (1500-1699), Diamond (1700+)</div>
+          </div>
         </div>
       )}
 
